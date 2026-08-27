@@ -14,16 +14,17 @@ import numpy as np
 import pandas as pd
 import torch
 
+# Labels are committed in-repo (data/); features are too large and stay external.
 ROOT = Path("/data/pathology/projects/clement/mutation-prediction")
 FEATURES = ROOT / "features" / "prism"
-CSVS = ROOT / "csvs"
+LABELS = Path(__file__).resolve().parents[2] / "data"
 
 # cohort -> (label csv, label column, feature directory). MSI gate cohorts only.
 # BLCA-MSI and PRAD-MSI are excluded: ~3 positives each (dead). See README.md.
 MSI_COHORTS: dict[str, tuple[Path, str, Path]] = {
-    "COAD": (CSVS / "tcga-coad/dx+msi.csv", "msi_high", FEATURES / "lxbzb8rd/features"),
-    "UCEC": (CSVS / "tcga-ucec/dx+msi.csv", "msi_high", FEATURES / "kooqa1ym/features"),
-    "STAD": (CSVS / "tcga-stad/dx+msi.csv", "msi_high", FEATURES / "oowdp902/features"),
+    "COAD": (LABELS / "tcga-coad/dx+msi.csv", "msi_high", FEATURES / "lxbzb8rd/features"),
+    "UCEC": (LABELS / "tcga-ucec/dx+msi.csv", "msi_high", FEATURES / "kooqa1ym/features"),
+    "STAD": (LABELS / "tcga-stad/dx+msi.csv", "msi_high", FEATURES / "oowdp902/features"),
 }
 
 

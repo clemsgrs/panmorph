@@ -15,9 +15,10 @@ So Phase 1 asked one clean question: **is there genuine shared morphology across
 
 ## Data
 
-All data lives under `/data/pathology/projects/clement/mutation-prediction/`.
-Labels: `csvs/tcga-<cohort>/dx+msi.csv`, column `msi_high`.
-Features: `features/prism/<hash>/features/<case_id>.pt`, shape `(1280,)`, one per patient.
+Labels are committed in this repo: `data/tcga-<cohort>/dx+msi.csv`, column `msi_high`.
+Features are too large to commit and stay external, under
+`/data/pathology/projects/clement/mutation-prediction/`:
+`features/prism/<hash>/features/<case_id>.pt`, shape `(1280,)`, one per patient.
 
 | Organ | Cohort | MSI+ / n | Feature hash |
 |---|---|---|---|
@@ -122,6 +123,7 @@ It becomes a real question only after more MSI-labeled organs join the matrix.
 
 ## Layout
 
+- `data/` — committed MSI label CSVs, one directory per cohort.
 - `src/panmorph/` — library (data loading, CV, probe, metrics, site probe).
 - `experiments/` — runnable entry points.
 - `results/` — committed gate output (`gate_results.csv`, logs).
