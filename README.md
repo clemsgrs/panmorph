@@ -57,16 +57,19 @@ The zero-overlap cohorts and the permutation null defeat it.
 
 Verdict: **STRONG PASS.**
 
-| Source → Target | AUC [95% CI] | perm p |
-|---|---|---|
-| **COAD → STAD** | **0.760** [0.697, 0.819] | **0.001** |
-| **STAD → COAD** | **0.744** [0.680, 0.808] | **0.003** |
-| COAD → UCEC | 0.588 [0.531, 0.639] | 0.099 |
-| STAD → UCEC | 0.590 [0.539, 0.640] | 0.101 |
-| UCEC → COAD | 0.571 [0.496, 0.647] | 0.220 |
-| UCEC → STAD | 0.521 [0.443, 0.604] | 0.441 |
+Zero-shot AUC. Rows: the organ the model trained on. Columns: the organ it was tested on.
 
-Within-organ site-out ceilings: COAD 0.767, STAD 0.858, UCEC 0.755.
+| Trained on ↓ · Tested on → | Colon (COAD) | Stomach (STAD) | Endometrium (UCEC) |
+|---|:---:|:---:|:---:|
+| **Colon (COAD)** | _(0.77)_ | **0.76 ✓** | 0.59 |
+| **Stomach (STAD)** | **0.74 ✓** | _(0.86)_ | 0.59 |
+| **Endometrium (UCEC)** | 0.57 | 0.52 | _(0.76)_ |
+
+- **✓** = significant, confound-free transfer. COAD→STAD 0.760 [0.697, 0.819], p = 0.001;
+  STAD→COAD 0.744 [0.680, 0.808], p = 0.003.
+- Plain cells: no significant transfer (all p ≥ 0.10).
+- _(Diagonal)_: the organ tested on itself with leave-site-out CV — the honest ceiling, for reference.
+- Full precision: `results/gate_results.csv`.
 
 Takeaways:
 
@@ -101,8 +104,9 @@ Try a newer foundation model (e.g. PRISM2) or a tile encoder with a trainable MI
 aggregator (needs tile-level feature extraction).
 If a stronger model makes UCEC transfer, its wall was representational, not biological.
 
-**RQ3 (parked): what governs whether transfer happens?**
-One transferring pair is n≈1 of variation. Needs more MSI-labeled organs first.
+Explaining *why* transfer happens is deliberately out of scope for now.
+With one transferring pair, there is nothing to generalize from.
+It becomes a real question only after more MSI-labeled organs join the matrix.
 
 ## Layout
 
