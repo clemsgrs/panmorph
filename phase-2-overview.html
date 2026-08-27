@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>panmorph — phase 2 overview</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel-2:#1d212b; --ink:#e7ebf0;
+    --muted:#9aa4b2; --line:#2a2f3a; --accent:#5ed0c5; --accent-2:#7aa2ff;
+    --warn:#f0b86e; --good:#7ce0a0; --dim:#6b7480;
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:920px; margin:0 auto; padding:56px 24px 80px}
+  header.hero{margin-bottom:44px}
+  .eyebrow{letter-spacing:.18em; text-transform:uppercase; font-size:12px; color:var(--accent); font-weight:600}
+  h1{font-size:38px; line-height:1.15; margin:.35em 0 .25em; font-weight:700; letter-spacing:-.01em}
+  .lede{font-size:18px; color:var(--muted); max-width:62ch; margin:0}
+  .badge{
+    display:inline-flex; align-items:center; gap:8px; margin-top:22px;
+    background:rgba(124,224,160,.1); color:var(--good); border:1px solid rgba(124,224,160,.3);
+    padding:7px 14px; border-radius:999px; font-size:13.5px; font-weight:600;
+  }
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 0 4px rgba(124,224,160,.15)}
+  section{margin-top:52px}
+  h2{font-size:13px; letter-spacing:.16em; text-transform:uppercase; color:var(--dim); font-weight:700; margin:0 0 18px; padding-bottom:10px; border-bottom:1px solid var(--line)}
+  h3{font-size:17px; margin:0 0 6px; font-weight:650}
+  p{margin:0 0 12px}
+  .muted{color:var(--muted)}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.92em; color:var(--accent)}
+
+  /* gate panel */
+  .gate{background:linear-gradient(180deg,var(--panel),var(--panel-2)); border:1px solid var(--line); border-radius:var(--radius); padding:22px 24px}
+  .gate .row{display:flex; flex-wrap:wrap; gap:10px 26px; margin-top:14px}
+  .stat{display:flex; flex-direction:column}
+  .stat b{font-size:22px; font-weight:700; letter-spacing:-.01em}
+  .stat span{font-size:12.5px; color:var(--muted)}
+  .stat.good b{color:var(--good)} .stat.warn b{color:var(--warn)}
+
+  /* cards */
+  .cards{display:grid; gap:16px}
+  .cards.three{grid-template-columns:repeat(3,1fr)}
+  .cards.two{grid-template-columns:repeat(2,1fr)}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:18px 18px 16px; position:relative}
+  .card .tag{font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; padding:3px 8px; border-radius:6px; display:inline-block; margin-bottom:10px}
+  .tag.primary{background:rgba(94,208,197,.14); color:var(--accent)}
+  .tag.secondary{background:rgba(122,162,255,.14); color:var(--accent-2)}
+  .tag.parked{background:rgba(155,164,178,.14); color:var(--muted)}
+  .tag.contingent{background:rgba(240,184,110,.14); color:var(--warn)}
+  .card p{font-size:14.5px; color:var(--muted); margin:0}
+  .card p + p{margin-top:9px}
+
+  /* spine */
+  .spine{display:grid; gap:14px}
+  .step{display:grid; grid-template-columns:auto 1fr; gap:18px; background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:18px 20px}
+  .step .k{font-family:ui-monospace,monospace; font-size:13px; color:var(--accent); font-weight:700; padding-top:2px; white-space:nowrap}
+  .step h3 .pill{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); border:1px solid var(--line); padding:2px 7px; border-radius:6px; margin-left:8px; vertical-align:middle}
+  .step ul{margin:8px 0 0; padding-left:18px; color:var(--muted); font-size:14px}
+  .step li{margin:3px 0}
+
+  /* table */
+  table{width:100%; border-collapse:collapse; font-size:14px; background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); overflow:hidden}
+  th,td{text-align:left; padding:11px 14px; border-bottom:1px solid var(--line); vertical-align:top}
+  th{font-size:12px; letter-spacing:.05em; text-transform:uppercase; color:var(--dim); font-weight:700}
+  tr:last-child td{border-bottom:none}
+  td:first-child{font-weight:600; color:var(--ink); white-space:nowrap}
+  td.exp{color:var(--muted)}
+
+  /* sequence timeline */
+  ol.timeline{list-style:none; margin:0; padding:0; display:grid}
+  ol.timeline li{position:relative; display:grid; grid-template-columns:34px 1fr; column-gap:18px; padding:0 0 20px}
+  ol.timeline li:last-child{padding-bottom:0}
+  ol.timeline li::before{content:""; position:absolute; left:16px; top:34px; bottom:-2px; width:2px; background:var(--line)}
+  ol.timeline li:last-child::before{display:none}
+  ol.timeline .num{width:34px; height:34px; border-radius:50%; display:grid; place-items:center; font-family:ui-monospace,monospace; font-weight:700; font-size:14px; color:var(--accent); background:var(--panel); border:1px solid var(--line); z-index:1}
+  ol.timeline .body{padding-top:5px; font-size:14.5px; color:var(--muted)}
+  ol.timeline .body b{color:var(--ink); font-weight:650}
+  ol.timeline .when{display:inline-block; margin-left:8px; font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--dim); border:1px solid var(--line); border-radius:6px; padding:1px 7px; vertical-align:middle}
+
+  .note{background:rgba(240,184,110,.07); border:1px solid rgba(240,184,110,.25); border-radius:12px; padding:14px 18px; font-size:14px; color:var(--muted)}
+  .note b{color:var(--warn)}
+
+  footer{margin-top:56px; padding-top:20px; border-top:1px solid var(--line); font-size:12.5px; color:var(--dim)}
+  footer .mono{color:var(--dim)}
+
+  @media (max-width:680px){
+    .cards.three,.cards.two{grid-template-columns:1fr}
+    h1{font-size:30px}
+    .step{grid-template-columns:1fr}
+    .step .k{padding-bottom:4px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="eyebrow">panmorph · computational pathology</div>
+    <h1>Cross-organ transfer of genomic-biomarker morphology</h1>
+    <p class="lede">Predicting MSI status from H&amp;E whole-slide images, and asking the question prior work couldn't: <em>when does the morphology learned in one organ carry to another — and how much is that worth?</em></p>
+    <div class="badge"><span class="dot"></span> Go / no-go gate &nbsp;·&nbsp; PASSED</div>
+  </header>
+
+  <section id="start">
+    <h2>Where phase 2 starts</h2>
+    <div class="gate">
+      <p style="margin:0">The gate established <b>confound-free, organ-dependent</b> cross-organ MSI transfer on frozen PRISM embeddings. Cohorts share zero tissue-source-sites and the target organ is never trained on — so neither sample size nor a site shortcut explains the signal.</p>
+      <div class="row">
+        <div class="stat good"><b>0.760</b><span>COAD → STAD &nbsp;(perm p&lt;0.005)</span></div>
+        <div class="stat good"><b>0.744</b><span>STAD → COAD &nbsp;(perm p&lt;0.005)</span></div>
+        <div class="stat warn"><b>n.s.</b><span>UCEC → any &nbsp;(p ≈ 0.10–0.44)</span></div>
+        <div class="stat"><b>0.755</b><span>UCEC within-organ ceiling</span></div>
+      </div>
+      <p class="muted" style="margin:16px 0 0; font-size:14px">Transfer is real but <b style="color:var(--ink)">organ-dependent</b>: GI↔GI transfers, the gynecological organ doesn't — even though it's individually predictable. That asymmetry is the conceptual core of phase 2.</p>
+    </div>
+  </section>
+
+  <section id="rqs">
+    <h2>The questions</h2>
+    <div class="cards three">
+      <div class="card">
+        <span class="tag primary">RQ1 · primary</span>
+        <h3>Value</h3>
+        <p>How many local positives is a foreign organ worth? Converts the binary transfer result into a continuous <em>substitution rate</em> for scarce labels.</p>
+        <p style="color:var(--good)">Fully powered today — measured <em>within</em> existing organ pairs.</p>
+      </div>
+      <div class="card">
+        <span class="tag secondary">RQ2 · secondary</span>
+        <h3>Representation</h3>
+        <p>Does the transfer survive — or improve under — a stronger representation? Two separable axes: head capacity and aggregation capacity.</p>
+        <p>De-risks the value result as not a capacity artifact.</p>
+      </div>
+      <div class="card">
+        <span class="tag parked">RQ3 · parked</span>
+        <h3>Mechanism</h3>
+        <p>What <em>governs</em> whether transfer happens? A claim about variation across pairs — with one transferring pair, that's n≈1.</p>
+        <p>Blocked on adding organs; kept alive only as free byproducts.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="spine">
+    <h2>The experiment spine</h2>
+    <div class="spine">
+
+      <div class="step">
+        <div class="k">E1</div>
+        <div>
+          <h3>Value measurement <span class="pill">load-bearing</span></h3>
+          <p class="muted" style="font-size:14.5px; margin:0">Simulate scarcity by subsampling a label-rich organ down a <span class="mono">k</span>-sweep, so a real organ-specific ceiling exists to check against. The few-shot lift over cold-start <em>is</em> the value.</p>
+          <ul>
+            <li>Shared site-grouped <b>out-of-fold scaffold</b> → every curve point sits on the identical, site-clean test set</li>
+            <li><span class="mono">k</span> counts <b>positives, prevalence-matched</b> (each draw carries negatives at the organ's natural rate) — an MSI label costs one assay per case</li>
+            <li>The lowest rungs (<span class="mono">k=3–5</span> positives) <b>are</b> the genuinely-scarce few-shot regime — now measured against a real ceiling</li>
+            <li>Two warm-start bases: <b>pooled</b> (a strong general model) and <b>single-source</b> (which organ carries the value)</li>
+            <li>Formal test = the <b>lift</b>, against a within-source label-permutation null that controls the sample-size confound</li>
+            <li>Substitution rate <span class="mono">k*</span> reported as estimation, with a confidence interval</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="k">swap</div>
+        <div>
+          <h3>Budget-matched swap <span class="pill">secondary control</span></h3>
+          <p class="muted" style="font-size:14.5px; margin:0">The dual of E1. Where E1 holds the source fixed and <em>adds</em> target labels ("how much does a little local data help on top of the foreign model?"), the swap holds the total budget fixed and <em>trades</em> source for target ("at equal labeling cost, is a local case worth more than a foreign one?"). Two different value questions — reported as distinct, never merged.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="k">RQ2</div>
+        <div>
+          <h3>Capacity ladder <span class="pill">representation</span></h3>
+          <p class="muted" style="font-size:14.5px; margin:0">Encoder frozen throughout; the variable is tile→slide aggregation.</p>
+          <ul>
+            <li><b>MLP head first</b> — settles whether a linear boundary is the bottleneck (cheap)</li>
+            <li>Then <b>frozen-encoder + trainable MIL</b> — so any gain is attributable to aggregation, not a bigger head</li>
+            <li>A control, not the headline — unless MIL <em>cracks UCEC</em>, flipping that wall from biology to aggregation</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="k">＋</div>
+        <div>
+          <h3>Shared-subspace probe <span class="pill" style="color:var(--warn);border-color:rgba(240,184,110,.4)">contingent</span></h3>
+          <p class="muted" style="font-size:14.5px; margin:0">Runs <em>only if</em> the pooled base shows negative transfer (a non-sharer diluting the value curve). Goal: a source-only invariant projection that recovers the pooled-base curve to ≈ the best single-source base — a direct rebuttal of "multi-tissue training is a wash." Demoted from a pillar because it's underpowered with only two sharing organs.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section id="expect">
+    <h2>What we expect to see</h2>
+    <table>
+      <thead><tr><th>Experiment</th><th>Anticipated result</th></tr></thead>
+      <tbody>
+        <tr><td>E1 · COAD→STAD</td><td class="exp">Large low-<span class="mono">k</span> lift, converging toward the ~0.76 ceiling — significant against the permutation null.</td></tr>
+        <tr><td>E1 · UCEC</td><td class="exp">Warm-start collapses onto cold-start (≈0 lift) — the free, graded signature of a non-sharer.</td></tr>
+        <tr><td>E1 · pooled base</td><td class="exp">Diluted by the non-sharer (<span class="mono">COAD+UCEC→STAD ≈ GI-only</span>) — this is what triggers the probe.</td></tr>
+        <tr><td>E1 · low-<span class="mono">k</span> (≈2–3 pos)</td><td class="exp">Warm-start already well above chance where cold-start is flat — the scarce-target claim, <em>measured</em> (no unfalsifiable PRAD demo needed).</td></tr>
+        <tr><td>Capacity ladder</td><td class="exp">MLP ≈ linear; MIL a modest aggregation gain at most — possibly cracking UCEC.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="honest">
+    <h2>How we keep it honest</h2>
+    <div class="cards two">
+      <div class="card">
+        <h3>Confound discipline</h3>
+        <p>Carried over from the gate: cohorts share <b>zero tissue-source-sites</b> (structural, not harmonized away), and cross-validation is grouped by site so a site never appears in both train and test.</p>
+      </div>
+      <div class="card">
+        <h3>The right null</h3>
+        <p>Significance is the few-shot <b>lift</b> against a <b>within-source label-permutation</b> null — it holds source data volume fixed and randomizes only labels, so a win means biology, not "more rows." (A prediction-swap permutation would readmit that confound.)</p>
+      </div>
+      <div class="card">
+        <h3>Substrate matched to question</h3>
+        <p>Value measurement runs on a <b>parameter-light, fixed-HP</b> estimator with no per-run tune split — robust under scarcity, where a held-out tune set has no clean source. The trained-NN + tune-split machinery is reserved for the label-rich capacity ladder.</p>
+      </div>
+      <div class="card">
+        <h3>One honest AUC</h3>
+        <p>Pooled <b>out-of-fold</b> scoring (never averaged per-fold), with a cheap safeguard: report it beside the averaged-per-fold number, and rank-normalize within fold if they diverge.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="seq">
+    <h2>Sequencing</h2>
+    <ol class="timeline">
+      <li><span class="num">1</span><div class="body"><b>E1 — the spine.</b> Its <span class="mono">k=0</span> slice <em>is</em> the transfer map, so the map comes for free; its low-<span class="mono">k</span> rungs are the scarce-target claim.</div></li>
+      <li><span class="num">2</span><div class="body"><b>Capacity ladder.</b> MLP rung, then MIL, in the label-rich regime — independent of E1's timing.<span class="when">parallel</span></div></li>
+      <li><span class="num">3</span><div class="body"><b>Shared-subspace probe.</b> Only if E1's pooled base shows negative transfer.<span class="when">contingent</span></div></li>
+      <li><span class="num">4</span><div class="body"><b>Budget-matched swap.</b> Secondary dual control — any time after E1.<span class="when">secondary</span></div></li>
+    </ol>
+    <div class="note" style="margin-top:18px">
+      <b>Blocker.</b> Powering the mechanism question (and a second biomarker, TP53) is blocked on BRCA + BLCA PRISM feature extraction — the route to adding organs, which is what n≈1 needs.
+    </div>
+  </section>
+
+  <footer>
+    Synthesis of the phase-2 design · full spec in <span class="mono">docs/phase-2-plan.md</span>, <span class="mono">research-questions.md</span>, <span class="mono">experimental-design.md</span> (decisions 11–22), <span class="mono">methods-notes.md</span>. &nbsp;·&nbsp; 2026-06-23.
+  </footer>
+
+</div>
+</body>
+</html>
