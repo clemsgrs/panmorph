@@ -90,6 +90,15 @@ Cautions when citing:
 
 **RQ1 (primary): how many local positives is a foreign organ worth?**
 
+Why this matters clinically: in some organs, MSI-positive patients are very rare.
+Prostate is the extreme case — 3 positives in 398 TCGA cases.
+Collecting enough positives for a decent supervised model is close to impossible there.
+For such organs, borrowed foreign-organ signal may be the only way to get a model at all.
+Prostate is also too label-poor to *evaluate* on, so E1 measures the value where the truth
+is known: it simulates scarcity by subsampling the label-rich organs.
+The analysis works for any organ mix; prostate is simply the example with the
+strongest clinical motivation.
+
 Experiment **E1**: sweep k added target positives (prevalence-matched draws).
 Compare warm start (begin from the foreign-organ model) against cold start (local cases only).
 The gap between the curves is the value, in local labeled cases saved.
@@ -103,6 +112,18 @@ There is no test suite yet; the E1 build establishes the first one.
 Try a newer foundation model (e.g. PRISM2) or a tile encoder with a trainable MIL
 aggregator (needs tile-level feature extraction).
 If a stronger model makes UCEC transfer, its wall was representational, not biological.
+
+**On the shelf: steering the model toward organ-agnostic morphology.**
+In earlier explorations we tried to force cross-organ features directly:
+
+- A domain-adversarial loss (gradient reversal on organ identity) to remove the
+  organ signal from the representation.
+- A factorized latent space, split into organ-specific and organ-agnostic parts,
+  kept apart with an orthogonality constraint.
+
+These are worth reviving if plain training does not deliver the transfer we want.
+Two cautions from earlier feedback: adversarial organ removal can hurt, and pure
+organ invariance may be too strong — the best model may need both feature types.
 
 Explaining *why* transfer happens is deliberately out of scope for now.
 With one transferring pair, there is nothing to generalize from.
