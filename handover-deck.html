@@ -1,0 +1,381 @@
+<title>PanMorph Handover</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,340;9..144,560;9..144,640&family=Source+Sans+3:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --paper: #FAF8FB;
+    --surface: #FFFFFF;
+    --surface-2: #F2EFF6;
+    --ink: #241F33;
+    --ink-2: #6E6884;
+    --line: #E3DEEC;
+    --hema: #5A4A9C;
+    --hema-soft: #EDE9F7;
+    --eosin: #C05577;
+    --eosin-soft: #F9EDF1;
+    --pass: #2E7D5B;
+    --pass-soft: #E4F1EA;
+    --warn: #A8641E;
+    --warn-soft: #F7EDDF;
+    --cell-strong: #5A4A9C;
+    --cell-mid: #B0A6D6;
+    --cell-weak: #E9E5F2;
+    --shadow: 0 1px 2px rgba(36,31,51,.05), 0 8px 28px rgba(36,31,51,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #171420;
+      --surface: #1F1B2C;
+      --surface-2: #282338;
+      --ink: #EDEAF4;
+      --ink-2: #9C95B3;
+      --line: #363048;
+      --hema: #A497DD;
+      --hema-soft: #2C2545;
+      --eosin: #D9829D;
+      --eosin-soft: #3A2531;
+      --pass: #6DBD97;
+      --pass-soft: #1E3A2E;
+      --warn: #D69A55;
+      --warn-soft: #3A2D1B;
+      --cell-strong: #6E5BBF;
+      --cell-mid: #4A3F73;
+      --cell-weak: #2A2540;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 28px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #171420;
+    --surface: #1F1B2C;
+    --surface-2: #282338;
+    --ink: #EDEAF4;
+    --ink-2: #9C95B3;
+    --line: #363048;
+    --hema: #A497DD;
+    --hema-soft: #2C2545;
+    --eosin: #D9829D;
+    --eosin-soft: #3A2531;
+    --pass: #6DBD97;
+    --pass-soft: #1E3A2E;
+    --warn: #D69A55;
+    --warn-soft: #3A2D1B;
+    --cell-strong: #6E5BBF;
+    --cell-mid: #4A3F73;
+    --cell-weak: #2A2540;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 28px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    font-size: 17px;
+    line-height: 1.55;
+  }
+  .deck { display: flex; flex-direction: column; }
+  .slide {
+    min-height: 92vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4.5rem 1.5rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .slide-inner { width: 100%; max-width: 860px; }
+
+  .eyebrow {
+    display: flex; align-items: baseline; gap: .75rem;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .78rem; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink-2); margin-bottom: 1.4rem;
+  }
+  .eyebrow .num { color: var(--eosin); font-weight: 600; }
+
+  h1, h2 {
+    font-family: "Fraunces", Georgia, serif;
+    font-weight: 560; line-height: 1.12; text-wrap: balance;
+    margin: 0 0 1.1rem;
+  }
+  h1 { font-size: clamp(2.4rem, 6vw, 3.6rem); font-weight: 640; }
+  h2 { font-size: clamp(1.6rem, 4vw, 2.2rem); }
+  p { max-width: 62ch; margin: 0 0 .9rem; }
+  .lede { font-size: 1.12rem; color: var(--ink-2); max-width: 58ch; }
+  strong { font-weight: 700; }
+  .accent { color: var(--hema); }
+  mono, .mono { font-family: "IBM Plex Mono", monospace; font-size: .92em; }
+  code {
+    font-family: "IBM Plex Mono", monospace; font-size: .86em;
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 4px; padding: .08em .35em;
+  }
+
+  .chip {
+    display: inline-block; font-family: "IBM Plex Mono", monospace;
+    font-size: .74rem; font-weight: 600; letter-spacing: .1em; text-transform: uppercase;
+    padding: .28em .7em; border-radius: 999px; margin-right: .4rem;
+  }
+  .chip.pass { background: var(--pass-soft); color: var(--pass); }
+  .chip.warn { background: var(--warn-soft); color: var(--warn); }
+  .chip.hema { background: var(--hema-soft); color: var(--hema); }
+  .chip.eosin { background: var(--eosin-soft); color: var(--eosin); }
+
+  .cards { display: grid; gap: 1rem; margin: 1.6rem 0 0; }
+  .cards.two { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .card {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 12px; padding: 1.15rem 1.3rem; box-shadow: var(--shadow);
+  }
+  .card h3 {
+    margin: 0 0 .5rem; font-size: .8rem; font-weight: 700;
+    letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2);
+  }
+  .card p { font-size: .96rem; margin-bottom: .4rem; }
+  .card p:last-child { margin-bottom: 0; }
+
+  table { border-collapse: collapse; width: 100%; margin: 1.4rem 0 .4rem; font-size: .95rem; }
+  th, td { text-align: left; padding: .55rem .8rem; border-bottom: 1px solid var(--line); }
+  th { font-size: .76rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); font-weight: 700; }
+  td.num, th.num { text-align: right; font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; font-size: .9rem; }
+  .table-scroll { overflow-x: auto; }
+  .dead { color: var(--ink-2); }
+  .footnote { font-size: .85rem; color: var(--ink-2); max-width: 62ch; }
+
+  /* transfer matrix */
+  .matrix-wrap { margin: 1.8rem 0 .6rem; overflow-x: auto; }
+  .matrix {
+    display: grid; grid-template-columns: 7.5rem repeat(3, minmax(9.5rem, 1fr));
+    gap: 6px; min-width: 560px;
+  }
+  .m-corner, .m-head {
+    font-family: "IBM Plex Mono", monospace; font-size: .74rem;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2);
+    display: flex; align-items: center; padding: .3rem .5rem;
+  }
+  .m-head { justify-content: center; }
+  .m-cell {
+    border-radius: 10px; padding: .8rem .6rem; text-align: center;
+    background: var(--cell-weak); border: 1px solid var(--line);
+  }
+  .m-cell .auc {
+    font-family: "IBM Plex Mono", monospace; font-size: 1.35rem; font-weight: 600;
+    font-variant-numeric: tabular-nums; display: block;
+  }
+  .m-cell .sub { font-family: "IBM Plex Mono", monospace; font-size: .72rem; color: var(--ink-2); display: block; margin-top: .15rem; }
+  .m-cell.strong {
+    background: var(--cell-strong); border-color: var(--cell-strong); color: #fff;
+  }
+  .m-cell.strong .sub { color: rgba(255,255,255,.85); }
+  .m-cell.diag {
+    background: var(--surface); border-style: dashed;
+  }
+  .m-cell.diag .auc { color: var(--ink-2); font-size: 1.1rem; }
+  .legend { display: flex; flex-wrap: wrap; gap: 1.2rem; font-size: .82rem; color: var(--ink-2); margin-top: .8rem; }
+  .legend span { display: inline-flex; align-items: center; gap: .45rem; }
+  .swatch { width: .9rem; height: .9rem; border-radius: 3px; border: 1px solid var(--line); display: inline-block; }
+  .swatch.strong { background: var(--cell-strong); border-color: var(--cell-strong); }
+  .swatch.weak { background: var(--cell-weak); }
+  .swatch.diag { background: var(--surface); border-style: dashed; }
+
+  .big-claim {
+    font-family: "Fraunces", Georgia, serif; font-size: clamp(1.3rem, 3vw, 1.7rem);
+    font-weight: 560; line-height: 1.3; text-wrap: balance;
+    border-left: 3px solid var(--eosin); padding-left: 1.1rem; margin: 1.6rem 0;
+  }
+
+  ol.steps { margin: 1.2rem 0 0; padding-left: 1.3rem; max-width: 62ch; }
+  ol.steps li { margin-bottom: .55rem; }
+  ul.tight { margin: .8rem 0 0; padding-left: 1.2rem; max-width: 64ch; }
+  ul.tight li { margin-bottom: .5rem; }
+
+  .kicker-nav {
+    position: fixed; bottom: 1rem; right: 1.2rem;
+    font-family: "IBM Plex Mono", monospace; font-size: .72rem; color: var(--ink-2);
+    background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
+    padding: .3em .9em; box-shadow: var(--shadow); user-select: none;
+  }
+  @media (max-width: 640px) { .kicker-nav { display: none; } }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+
+<div class="deck">
+
+<!-- 1 · Title -->
+<section class="slide" id="s1"><div class="slide-inner">
+  <div class="eyebrow"><span class="num">01</span><span>Project handover · 27 Aug 2026</span></div>
+  <h1>Pan<span class="accent">Morph</span></h1>
+  <p class="lede">Mapping cross-organ transfer in histology-based genomic biomarker prediction.</p>
+  <p style="margin-top:1.4rem"><span class="chip pass">Phase 1 · Strong pass</span><span class="chip hema">Phase 2 · Designed, not built</span></p>
+  <p style="margin-top:1.2rem">We predict MSI status from H&amp;E slides with frozen PRISM embeddings.<br>
+  We ask: does a model trained on one organ work on another organ?<br>
+  Phase 1 answered: <strong>yes — the transfer is real, confound-free, and organ-dependent.</strong></p>
+</div></section>
+
+<!-- 2 · Motivation -->
+<section class="slide" id="s2"><div class="slide-inner">
+  <div class="eyebrow"><span class="num">02</span><span>Motivation</span></div>
+  <h2>The obvious claim was a trap</h2>
+  <p>The project began with a hope: multi-organ training improves biomarker prediction.
+  An early pilot seemed to agree. Prostate TP53 AUC rose from 0.72 to 0.75 with foreign organs.</p>
+  <div class="big-claim">But the enriched run also grew training positives from ~24 to ~549. The gain had two mundane explanations before any biological one.</div>
+  <div class="cards two">
+    <div class="card"><h3>Confound A — sample size</h3><p>More positives help any model. Organ identity may be irrelevant.</p></div>
+    <div class="card"><h3>Confound B — site shortcut</h3><p>TCGA slides carry hospital signatures. Models can cheat on them (Howard et&nbsp;al. 2021).</p></div>
+  </div>
+  <p style="margin-top:1.4rem">So we reframed the project. The question is not <em>whether</em> multi-organ training helps.
+  The question is <strong>when transfer is positive, negative, or absent — and why.</strong></p>
+</div></section>
+
+<!-- 3 · Data -->
+<section class="slide" id="s3"><div class="slide-inner">
+  <div class="eyebrow"><span class="num">03</span><span>Data</span></div>
+  <h2>Three organs, zero shared sites</h2>
+  <p>Substrate: frozen <strong>PRISM</strong> slide-level embeddings. 1280 dimensions, one vector per patient.
+  Labels: TCGA MSI status. Everything is verified against disk.</p>
+  <div class="table-scroll"><table>
+    <tr><th>Organ</th><th>Cohort</th><th class="num">MSI-high / n</th><th class="num">Prevalence</th><th>Status</th></tr>
+    <tr><td>Endometrium</td><td class="mono">UCEC</td><td class="num">155 / 487</td><td class="num">32%</td><td>core</td></tr>
+    <tr><td>Colon</td><td class="mono">COAD</td><td class="num">74 / 391</td><td class="num">19%</td><td>core</td></tr>
+    <tr><td>Stomach</td><td class="mono">STAD</td><td class="num">63 / 371</td><td class="num">17%</td><td>core</td></tr>
+    <tr class="dead"><td>Bladder</td><td class="mono">BLCA</td><td class="num">3 / 383</td><td class="num">~1%</td><td>dead — too few positives</td></tr>
+    <tr class="dead"><td>Prostate</td><td class="mono">PRAD</td><td class="num">3 / 398</td><td class="num">~1%</td><td>dead — too few positives</td></tr>
+  </table></div>
+  <p style="margin-top:1rem">The three core cohorts share <strong>zero tissue-source sites</strong>.
+  That single fact makes the site confound testable.</p>
+  <p class="footnote">TP53 is the planned second biomarker. It is blocked: BRCA and BLCA have no PRISM features extracted yet.</p>
+</div></section>
+
+<!-- 4 · The gate -->
+<section class="slide" id="s4"><div class="slide-inner">
+  <div class="eyebrow"><span class="num">04</span><span>Experiments</span></div>
+  <h2>One pre-registered gate</h2>
+  <p>Phase 1 was scoped as a go/no-go decision, not a paper.
+  The null to kill: <em>off-diagonal AUC is explained by sample size or site signatures, not shared morphology.</em></p>
+  <div class="cards two">
+    <div class="card"><h3>1 · Honest ceilings</h3><p>Within-organ AUC with <strong>leave-site-out</strong> CV. Random CV is reported only as the site-inflated contrast.</p></div>
+    <div class="card"><h3>2 · Zero-shot matrix</h3><p>Train on source organ(s). Test on a never-seen target. Patient-level bootstrap CIs.</p></div>
+    <div class="card"><h3>3 · Permutation null</h3><p>Shuffle source labels 1000×. Empirical p per matrix cell.</p></div>
+    <div class="card"><h3>Pass rule (fixed in advance)</h3><p>CI lower bound &gt; 0.60 <strong>and</strong> perm p &lt; 0.05, in <strong>both</strong> COAD↔STAD directions.</p></div>
+  </div>
+  <p style="margin-top:1.4rem">The model is deliberately boring: a fixed logistic probe, no tuning.
+  A separate diagnostic showed the threat was real — TCGA site is decodable from the embeddings
+  (balanced accuracy 0.58–0.73 vs chance ≈0.1). The gate had to beat that shortcut.</p>
+</div></section>
+
+<!-- 5 · Results -->
+<section class="slide" id="s5"><div class="slide-inner">
+  <div class="eyebrow"><span class="num">05</span><span>Results</span></div>
+  <h2>Strong pass <span class="chip pass" style="vertical-align:middle">verdict</span></h2>
+  <p>Both confirmatory directions passed the pre-registered rule. Full run: 1000 permutations, 2000 bootstraps.</p>
+  <div class="matrix-wrap"><div class="matrix">
+    <div class="m-corner">source ↓ · target →</div>
+    <div class="m-head">COAD</div><div class="m-head">STAD</div><div class="m-head">UCEC</div>
+    <div class="m-corner">COAD</div>
+    <div class="m-cell diag"><span class="auc">0.767</span><span class="sub">site-out ceiling</span></div>
+    <div class="m-cell strong"><span class="auc">0.760</span><span class="sub">p = .001 · PASS</span></div>
+    <div class="m-cell"><span class="auc">0.588</span><span class="sub">p = .099</span></div>
+    <div class="m-corner">STAD</div>
+    <div class="m-cell strong"><span class="auc">0.744</span><span class="sub">p = .003 · PASS</span></div>
+    <div class="m-cell diag"><span class="auc">0.858</span><span class="sub">site-out ceiling</span></div>
+    <div class="m-cell"><span class="auc">0.590</span><span class="sub">p = .101</span></div>
+    <div class="m-corner">UCEC</div>
+    <div class="m-cell"><span class="auc">0.571</span><span class="sub">p = .220</span></div>
+    <div class="m-cell"><span class="auc">0.521</span><span class="sub">p = .441</span></div>
+    <div class="m-cell diag"><span class="auc">0.755</span><span class="sub">site-out ceiling</span></div>
+  </div></div>
+  <div class="legend">
+    <span><span class="swatch strong"></span>confirmatory pass</span>
+    <span><span class="swatch weak"></span>no significant transfer</span>
+    <span><span class="swatch diag"></span>within-organ (honest ceiling)</span>
+  </div>
+  <p style="margin-top:1.4rem">Zero-shot GI↔GI recovers nearly the full honest ceiling:
+  a stomach-trained probe scores <span class="mono">0.744</span> on colon, against colon's own <span class="mono">0.767</span>.</p>
+</div></section>
+
+<!-- 6 · Reading the result -->
+<section class="slide" id="s6"><div class="slide-inner">
+  <div class="eyebrow"><span class="num">06</span><span>Interpretation</span></div>
+  <h2>Real, but organ-dependent</h2>
+  <ul class="tight">
+    <li><strong>GI↔GI transfer is real and confound-free.</strong> COAD and STAD are both Lynch/dMMR GI cancers. Zero shared sites; the target is never trained on.</li>
+    <li><strong>UCEC is the odd one out.</strong> It barely transfers in any direction (p ≈ 0.10–0.44), yet it is individually predictable (0.755). This is the atlas thesis, not a failure.</li>
+    <li><strong>We beat the closest prior work.</strong> Lee et&nbsp;al. 2025 (same organs, same labels, tile CNNs) got ~0.57 for CRC→STAD — chance level. Our frozen-PRISM probe gets 0.760. Both studies agree UCEC stands apart.</li>
+    <li><strong>Cite the full run.</strong> The quick run (100 perms) misread COAD→UCEC as significant. At 1000 perms it is not (p = .099).</li>
+  </ul>
+</div></section>
+
+<!-- 7 · Where things live -->
+<section class="slide" id="s7"><div class="slide-inner">
+  <div class="eyebrow"><span class="num">07</span><span>The map</span></div>
+  <h2>Where everything lives</h2>
+  <div class="table-scroll"><table>
+    <tr><th>What</th><th>Where</th></tr>
+    <tr><td>Code + docs</td><td class="mono">/data/pathology/projects/clement/code/panmorph</td></tr>
+    <tr><td>Authoritative docs</td><td class="mono">docs/ — start at docs/handover.md</td></tr>
+    <tr><td>Library</td><td class="mono">src/panmorph/ · data, CV, probe, metrics, site probe</td></tr>
+    <tr><td>Experiments</td><td class="mono">experiments/run_gate.py · run_site_probe.py</td></tr>
+    <tr><td>Results</td><td class="mono">results/ · gate_results.csv + logs</td></tr>
+    <tr><td>Raw data</td><td class="mono">/data/pathology/projects/clement/mutation-prediction/</td></tr>
+    <tr><td>Phase-2 build spec</td><td class="mono">docs/prd-phase-2.md · GitHub issue panmorph#1</td></tr>
+    <tr><td>Tracker</td><td>Linear project “panmorph”</td></tr>
+  </table></div>
+  <p class="footnote" style="margin-top:1rem">Reproduce the gate: <code>python experiments/run_gate.py --quick</code> (smoke test) or the full run without <code>--quick</code>.
+  The <code>docs/</code> directory is authoritative; older slide decks are not.</p>
+</div></section>
+
+<!-- 8 · Future work -->
+<section class="slide" id="s8"><div class="slide-inner">
+  <div class="eyebrow"><span class="num">08</span><span>Future work</span></div>
+  <h2>Three research questions, one queue</h2>
+  <p>Agreed scope: <strong>MSI first, as a complete story.</strong> TP53 follows as the second biomarker.</p>
+  <div class="cards">
+    <div class="card"><h3>RQ1 · Value <span class="chip eosin">primary · next</span></h3>
+      <p><em>How many local positives is a foreign organ worth?</em></p>
+      <p>Experiment E1: warm-start vs cold-start over k added target positives. Confirmatory rung pre-registered: COAD→STAD, pooled base, k=10. Fully specified in the PRD (34 user stories). Ready to build.</p></div>
+    <div class="card"><h3>RQ2 · Capacity <span class="chip hema">secondary</span></h3>
+      <p><em>Does the transfer survive a stronger head?</em></p>
+      <p>Ladder: linear → MLP (unblocked) → MIL (blocked on tile features). If MIL cracks UCEC, the GI↔endometrium wall was an aggregation artifact, not biology.</p></div>
+    <div class="card"><h3>RQ3 · Mechanism <span class="chip warn">blocked</span></h3>
+      <p><em>What governs whether transfer happens?</em></p>
+      <p>One transferring pair = n≈1 of variation. Honest answer: parked until we add MSI-labeled organs. This motivates cohort expansion.</p></div>
+  </div>
+</div></section>
+
+<!-- 9 · First steps -->
+<section class="slide" id="s9"><div class="slide-inner">
+  <div class="eyebrow"><span class="num">09</span><span>For the new lead</span></div>
+  <h2>Suggested first steps</h2>
+  <ol class="steps">
+    <li>Read <span class="mono">docs/phase-2-plan.md</span>, then <span class="mono">docs/results.md</span>, then the PRD.</li>
+    <li>Reproduce the gate: <code>python experiments/run_gate.py --quick</code>.</li>
+    <li>Build E1 from the PRD. Story 31 adds the first test suite.</li>
+    <li>In parallel: request PRISM feature extraction for BRCA + BLCA. This unblocks TP53.</li>
+    <li>Scope cohort expansion for RQ3: which TCGA cohorts have usable MSI labels?</li>
+  </ol>
+  <p style="margin-top:1.6rem" class="lede">The gate is passed. The value question is specified. The next result is waiting to be computed.</p>
+</div></section>
+
+</div>
+<div class="kicker-nav">↑ / ↓ to navigate</div>
+
+<script>
+  (function () {
+    var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+    function currentIndex() {
+      var mid = window.scrollY + window.innerHeight / 2;
+      for (var i = slides.length - 1; i >= 0; i--) {
+        if (slides[i].offsetTop <= mid) return i;
+      }
+      return 0;
+    }
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'PageDown' && e.key !== 'PageUp') return;
+      var i = currentIndex();
+      var next = (e.key === 'ArrowDown' || e.key === 'PageDown') ? Math.min(i + 1, slides.length - 1) : Math.max(i - 1, 0);
+      slides[next].scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      e.preventDefault();
+    });
+  })();
+</script>

@@ -10,6 +10,8 @@ decks, and exploratory scripts live outside `docs/` and are not authoritative.
 
 ## Index
 
+- [handover.md](handover.md) — **status + future-work handover** (written 2026-08-27 for
+  the project-revival meeting; start here if you are new to the project).
 - [data.md](data.md) — cohort statistics, label counts, feature inventory, site structure.
 - [experimental-design.md](experimental-design.md) — the go/no-go gate, its null hypothesis,
   controls, model choices, and the decisions log.
