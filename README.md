@@ -2,38 +2,120 @@
 
 **PanMorph: Mapping Cross-Organ Transfer in Histology-Based Genomic Biomarker Prediction.**
 
-Cross-organ transfer of genomic-biomarker prediction (MSI, later TP53) from H&E
-whole-slide images, on **frozen PRISM slide-level embeddings** (1280-d, one vector per
-case). The go/no-go gate has **PASSED**: confound-free, organ-dependent cross-organ MSI
-transfer (COAD↔STAD transfers; UCEC does not). Phase 2 measures the **value** question —
-*how many local positives is a foreign organ worth?*
+Can a model that reads tumor slides from one organ detect the same mutation in another organ?
+We test this for MSI, on frozen PRISM slide-level embeddings (1280-d, one vector per patient).
+Phase 1 answered: **yes — transfer is real, confound-free, and organ-dependent.**
+Phase 2 (the value question) is designed and ready to build.
 
-## Documentation
+_This README is the single source of documentation. The detailed design history
+(25-decision log, methods notes, PRD, related-work notes) lives in git history
+(before the doc consolidation) and in GitHub issue
+[panmorph#1](https://github.com/clemsgrs/panmorph/issues/1)._
 
-The `docs/` directory is the authoritative record of verified facts and agreed design
-decisions. **Start at [docs/README.md](docs/README.md)** for the full index. Key entries:
+## Motivation
 
-- [docs/phase-2-plan.md](docs/phase-2-plan.md) — single-document synthesis of the phase-2
-  plan (start here for the whole map).
-- [docs/experimental-design.md](docs/experimental-design.md) — the gate, its controls, and
-  the decisions log (rows 1–25).
-- [docs/results.md](docs/results.md) — gate results (STRONG PASS) and the zero-shot matrix.
-- [docs/data.md](docs/data.md) — cohort statistics, label counts, feature inventory.
-- [docs/methods-notes.md](docs/methods-notes.md) — CV / significance / imbalance rationale.
+MSI status decides immunotherapy eligibility. A lab assay is required today.
+Predicting MSI from routine H&E slides would be cheaper and faster.
+For many organs, labeled cases are scarce. The hope: borrow training data from label-rich organs.
+
+An early pilot seemed to confirm the hope, but it was confounded.
+Adding foreign organs also multiplied the training positives ~23×.
+More data helps any model. That proves nothing about organs.
+So Phase 1 asked one clean question: **is there genuine shared morphology across organs?**
+
+## Data
+
+All data lives under `/data/pathology/projects/clement/mutation-prediction/`.
+Labels: `csvs/tcga-<cohort>/dx+msi.csv`, column `msi_high`.
+Features: `features/prism/<hash>/features/<case_id>.pt`, shape `(1280,)`, one per patient.
+
+| Organ | Cohort | MSI+ / n | Feature hash |
+|---|---|---|---|
+| Colon | COAD | 74 / 391 | `lxbzb8rd` |
+| Stomach | STAD | 63 / 371 | `oowdp902` |
+| Endometrium | UCEC | 155 / 487 | `kooqa1ym` |
+
+Integrity is verified: no duplicate case ids, 100% label–feature match.
+The three cohorts share **zero** tissue-source sites. This makes the site confound testable.
+PRAD and BLCA are unusable for MSI (~3 positives each).
+
+## Phase 1 — the gate (done, PASSED)
+
+Design, fixed before running:
+
+1. Within-organ ceilings with leave-site-out CV (the honest number).
+2. Zero-shot matrix: train on source organ(s), test on a never-seen target. Bootstrap CIs.
+3. Within-source label-permutation null (1000×), empirical p per cell.
+4. Pass rule: CI lower bound > 0.60 **and** p < 0.05, in both COAD↔STAD directions.
+
+Model: fixed logistic probe on the frozen embeddings. No tuning.
+A separate probe confirmed hospitals are decodable from the embeddings
+(bal-acc 0.58–0.73 vs chance ≈0.1), so the site shortcut was a real threat.
+The zero-overlap cohorts and the permutation null defeat it.
+
+### Results (full run, 2026-06-23; raw output in `results/`)
+
+Verdict: **STRONG PASS.**
+
+| Source → Target | AUC [95% CI] | perm p |
+|---|---|---|
+| **COAD → STAD** | **0.760** [0.697, 0.819] | **0.001** |
+| **STAD → COAD** | **0.744** [0.680, 0.808] | **0.003** |
+| COAD → UCEC | 0.588 [0.531, 0.639] | 0.099 |
+| STAD → UCEC | 0.590 [0.539, 0.640] | 0.101 |
+| UCEC → COAD | 0.571 [0.496, 0.647] | 0.220 |
+| UCEC → STAD | 0.521 [0.443, 0.604] | 0.441 |
+
+Within-organ site-out ceilings: COAD 0.767, STAD 0.858, UCEC 0.755.
+
+Takeaways:
+
+- GI↔GI transfer is real and nearly recovers the honest ceilings.
+- UCEC does not transfer in any direction, although it is predictable within itself.
+  Transfer is organ-dependent. That is a finding, not a failure.
+- The closest prior work (Lee et al. 2025, PLoS One, `bib/`) found no usable
+  transfer on the same organs with tile CNNs. Foundation-model embeddings changed the answer.
+
+Cautions when citing:
+
+- Cite the full run, not `--quick`. The quick run misread COAD→UCEC as significant.
+- Do not use raw-space cosine similarity as mechanistic evidence. We checked; it
+  contradicts the (real) transfer result. Any mechanism probe must be pre-registered
+  in a shared low-dimensional subspace.
+
+## Phase 2 — the value question (designed, not built)
+
+**RQ1 (primary): how many local positives is a foreign organ worth?**
+
+Experiment **E1**: sweep k added target positives (prevalence-matched draws).
+Compare warm start (begin from the foreign-organ model) against cold start (local cases only).
+The gap between the curves is the value, in local labeled cases saved.
+Pre-registered confirmatory cell: **COAD→STAD, pooled base, k=10**
+(≈ a realistic 50-case local annotation budget).
+Statistic: paired lift Δ(k), averaged over fixed draw seeds; per-organ label-permutation null.
+Full specification: GitHub issue [panmorph#1](https://github.com/clemsgrs/panmorph/issues/1).
+There is no test suite yet; the E1 build establishes the first one.
+
+**RQ2 (secondary): does a stronger model change the picture?**
+Try a newer foundation model (e.g. PRISM2) or a tile encoder with a trainable MIL
+aggregator (needs tile-level feature extraction).
+If a stronger model makes UCEC transfer, its wall was representational, not biological.
+
+**RQ3 (parked): what governs whether transfer happens?**
+One transferring pair is n≈1 of variation. Needs more MSI-labeled organs first.
 
 ## Layout
 
-- `src/panmorph/` — library (data loading, CV, the fixed-HP probe, metrics, site probe).
-- `experiments/` — runnable entry points (see below).
-- `results/` — committed gate output (`full.log`, `gate_results.csv`).
+- `src/panmorph/` — library (data loading, CV, probe, metrics, site probe).
+- `experiments/` — runnable entry points.
+- `results/` — committed gate output (`gate_results.csv`, logs).
+- `handover-deck.html` — the project walk-through deck.
+- `bib/` — referenced papers.
 
 ## Running
 
 ```bash
-# Full gate: zero-shot matrix + within-source permutation null + leave-site-out ceiling
-python experiments/run_gate.py                 # 1000 perms, 2000 bootstraps
-python experiments/run_gate.py --quick         # smoke test: 100 perms, 500 bootstraps
-
-# Site-decodability diagnostic (not part of the gate decision)
-python experiments/run_site_probe.py
+python experiments/run_gate.py           # full gate: 1000 perms, 2000 bootstraps
+python experiments/run_gate.py --quick   # smoke test
+python experiments/run_site_probe.py     # site-decodability diagnostic
 ```
