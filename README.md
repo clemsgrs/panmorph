@@ -16,6 +16,9 @@ So Phase 1 asked one clean question: **is there genuine shared morphology across
 ## Data
 
 Labels are committed in this repo: `data/tcga-<cohort>/dx+msi.csv`, column `msi_high`.
+Each row also records `wsi_path` and `mask_path`: the packed slide and its tissue mask
+on disk. A new feature extractor (e.g. PRISM2) starts from these two columns.
+All paths verified present on 2026-08-27.
 Features are too large to commit and stay external, under
 `/data/pathology/projects/clement/mutation-prediction/`:
 `features/prism/<hash>/features/<case_id>.pt`, shape `(1280,)`, one per patient.
