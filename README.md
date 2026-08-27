@@ -106,6 +106,8 @@ Pre-registered confirmatory cell: **COAD→STAD, pooled base, k=10**
 (≈ a realistic 50-case local annotation budget).
 Statistic: paired lift Δ(k), averaged over fixed draw seeds; per-organ label-permutation null.
 Full specification: GitHub issue [panmorph#1](https://github.com/clemsgrs/panmorph/issues/1).
+That issue is a build spec, written for precision. Read its
+[plain-language brief](https://github.com/clemsgrs/panmorph/issues/1#issuecomment-5441118499) first.
 There is no test suite yet; the E1 build establishes the first one.
 
 **RQ2 (secondary): does a stronger model change the picture?**
