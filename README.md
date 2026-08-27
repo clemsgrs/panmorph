@@ -2,16 +2,6 @@
 
 **PanMorph: Mapping Cross-Organ Transfer in Histology-Based Genomic Biomarker Prediction.**
 
-Can a model that reads tumor slides from one organ detect the same mutation in another organ?
-We test this for MSI, on frozen PRISM slide-level embeddings (1280-d, one vector per patient).
-Phase 1 answered: **yes — transfer is real, confound-free, and organ-dependent.**
-Phase 2 (the value question) is designed and ready to build.
-
-_This README is the single source of documentation. The detailed design history
-(25-decision log, methods notes, PRD, related-work notes) lives in git history
-(before the doc consolidation) and in GitHub issue
-[panmorph#1](https://github.com/clemsgrs/panmorph/issues/1)._
-
 ## Motivation
 
 MSI status decides immunotherapy eligibility. A lab assay is required today.
@@ -106,8 +96,7 @@ Pre-registered confirmatory cell: **COAD→STAD, pooled base, k=10**
 (≈ a realistic 50-case local annotation budget).
 Statistic: paired lift Δ(k), averaged over fixed draw seeds; per-organ label-permutation null.
 Full specification: GitHub issue [panmorph#1](https://github.com/clemsgrs/panmorph/issues/1).
-That issue is a build spec, written for precision. Read its
-[plain-language brief](https://github.com/clemsgrs/panmorph/issues/1#issuecomment-5441118499) first.
+It opens with a plain-language brief; the precise build spec follows below it.
 There is no test suite yet; the E1 build establishes the first one.
 
 **RQ2 (secondary): does a stronger model change the picture?**
