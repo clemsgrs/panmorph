@@ -1,5 +1,0 @@
-- [x] Inventory project documentation and experiment-plan files.
-- [x] Read core docs for stated goals, hypotheses, datasets, methods, and claims.
-- [x] Cross-check experiment plan against scripts, source modules, and result artifacts.
-- [x] Identify risks, ambiguities, missing controls, and stale documentation.
-- [x] Summarize feedback with actionable recommendations.
