@@ -2,16 +2,6 @@
 
 **PanMorph: Mapping Cross-Organ Transfer in Histology-Based Genomic Biomarker Prediction.**
 
-Can a model that reads tumor slides from one organ detect the same mutation in another organ?
-We test this for MSI, on frozen PRISM slide-level embeddings (1280-d, one vector per patient).
-Phase 1 answered: **yes — transfer is real, confound-free, and organ-dependent.**
-Phase 2 (the value question) is designed and ready to build.
-
-_This README is the single source of documentation. The detailed design history
-(25-decision log, methods notes, PRD, related-work notes) lives in git history
-(before the doc consolidation) and in GitHub issue
-[panmorph#1](https://github.com/clemsgrs/panmorph/issues/1)._
-
 ## Motivation
 
 MSI status decides immunotherapy eligibility. A lab assay is required today.
@@ -25,9 +15,13 @@ So Phase 1 asked one clean question: **is there genuine shared morphology across
 
 ## Data
 
-All data lives under `/data/pathology/projects/clement/mutation-prediction/`.
-Labels: `csvs/tcga-<cohort>/dx+msi.csv`, column `msi_high`.
-Features: `features/prism/<hash>/features/<case_id>.pt`, shape `(1280,)`, one per patient.
+Labels are committed in this repo: `data/tcga-<cohort>/dx+msi.csv`, column `msi_high`.
+Each row also records `wsi_path` and `mask_path`: the packed slide and its tissue mask
+on disk. A new feature extractor (e.g. PRISM2) starts from these two columns.
+All paths verified present on 2026-08-27.
+Features are too large to commit and stay external, under
+`/data/pathology/projects/clement/mutation-prediction/`:
+`features/prism/<hash>/features/<case_id>.pt`, shape `(1280,)`, one per patient.
 
 | Organ | Cohort | MSI+ / n | Feature hash |
 |---|---|---|---|
@@ -57,16 +51,19 @@ The zero-overlap cohorts and the permutation null defeat it.
 
 Verdict: **STRONG PASS.**
 
-| Source → Target | AUC [95% CI] | perm p |
-|---|---|---|
-| **COAD → STAD** | **0.760** [0.697, 0.819] | **0.001** |
-| **STAD → COAD** | **0.744** [0.680, 0.808] | **0.003** |
-| COAD → UCEC | 0.588 [0.531, 0.639] | 0.099 |
-| STAD → UCEC | 0.590 [0.539, 0.640] | 0.101 |
-| UCEC → COAD | 0.571 [0.496, 0.647] | 0.220 |
-| UCEC → STAD | 0.521 [0.443, 0.604] | 0.441 |
+Zero-shot AUC. Rows: the organ the model trained on. Columns: the organ it was tested on.
 
-Within-organ site-out ceilings: COAD 0.767, STAD 0.858, UCEC 0.755.
+| Trained on ↓ · Tested on → | Colon (COAD) | Stomach (STAD) | Endometrium (UCEC) |
+|---|:---:|:---:|:---:|
+| **Colon (COAD)** | _(0.77)_ | **0.76 ✓** | 0.59 |
+| **Stomach (STAD)** | **0.74 ✓** | _(0.86)_ | 0.59 |
+| **Endometrium (UCEC)** | 0.57 | 0.52 | _(0.76)_ |
+
+- **✓** = significant, confound-free transfer. COAD→STAD 0.760 [0.697, 0.819], p = 0.001;
+  STAD→COAD 0.744 [0.680, 0.808], p = 0.003.
+- Plain cells: no significant transfer (all p ≥ 0.10).
+- _(Diagonal)_: the organ tested on itself with leave-site-out CV — the honest ceiling, for reference.
+- Full precision: `results/gate_results.csv`.
 
 Takeaways:
 
@@ -87,6 +84,15 @@ Cautions when citing:
 
 **RQ1 (primary): how many local positives is a foreign organ worth?**
 
+Why this matters clinically: in some organs, MSI-positive patients are very rare.
+Prostate is the extreme case — 3 positives in 398 TCGA cases.
+Collecting enough positives for a decent supervised model is close to impossible there.
+For such organs, borrowed foreign-organ signal may be the only way to get a model at all.
+Prostate is also too label-poor to *evaluate* on, so E1 measures the value where the truth
+is known: it simulates scarcity by subsampling the label-rich organs.
+The analysis works for any organ mix; prostate is simply the example with the
+strongest clinical motivation.
+
 Experiment **E1**: sweep k added target positives (prevalence-matched draws).
 Compare warm start (begin from the foreign-organ model) against cold start (local cases only).
 The gap between the curves is the value, in local labeled cases saved.
@@ -94,6 +100,7 @@ Pre-registered confirmatory cell: **COAD→STAD, pooled base, k=10**
 (≈ a realistic 50-case local annotation budget).
 Statistic: paired lift Δ(k), averaged over fixed draw seeds; per-organ label-permutation null.
 Full specification: GitHub issue [panmorph#1](https://github.com/clemsgrs/panmorph/issues/1).
+It opens with a plain-language brief; the precise build spec follows below it.
 There is no test suite yet; the E1 build establishes the first one.
 
 **RQ2 (secondary): does a stronger model change the picture?**
@@ -101,11 +108,25 @@ Try a newer foundation model (e.g. PRISM2) or a tile encoder with a trainable MI
 aggregator (needs tile-level feature extraction).
 If a stronger model makes UCEC transfer, its wall was representational, not biological.
 
-**RQ3 (parked): what governs whether transfer happens?**
-One transferring pair is n≈1 of variation. Needs more MSI-labeled organs first.
+**On the shelf: steering the model toward organ-agnostic morphology.**
+In earlier explorations we tried to force cross-organ features directly:
+
+- A domain-adversarial loss (gradient reversal on organ identity) to remove the
+  organ signal from the representation.
+- A factorized latent space, split into organ-specific and organ-agnostic parts,
+  kept apart with an orthogonality constraint.
+
+These are worth reviving if plain training does not deliver the transfer we want.
+Two cautions from earlier feedback: adversarial organ removal can hurt, and pure
+organ invariance may be too strong — the best model may need both feature types.
+
+Explaining *why* transfer happens is deliberately out of scope for now.
+With one transferring pair, there is nothing to generalize from.
+It becomes a real question only after more MSI-labeled organs join the matrix.
 
 ## Layout
 
+- `data/` — committed MSI label CSVs, one directory per cohort.
 - `src/panmorph/` — library (data loading, CV, probe, metrics, site probe).
 - `experiments/` — runnable entry points.
 - `results/` — committed gate output (`gate_results.csv`, logs).
