@@ -1,0 +1,368 @@
+<title>PanMorph Handover</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,340;9..144,560;9..144,640&family=Source+Sans+3:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --paper: #FAF8FB;
+    --surface: #FFFFFF;
+    --surface-2: #F2EFF6;
+    --ink: #241F33;
+    --ink-2: #6E6884;
+    --line: #E3DEEC;
+    --hema: #5A4A9C;
+    --hema-soft: #EDE9F7;
+    --eosin: #C05577;
+    --pass: #2E7D5B;
+    --pass-soft: #E4F1EA;
+    --warn: #A8641E;
+    --warn-soft: #F7EDDF;
+    --cell-strong: #5A4A9C;
+    --cell-weak: #E9E5F2;
+    --series-warm: #5A4A9C;
+    --series-cold: #C05577;
+    --shadow: 0 1px 2px rgba(36,31,51,.05), 0 8px 28px rgba(36,31,51,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #171420;
+      --surface: #1F1B2C;
+      --surface-2: #282338;
+      --ink: #EDEAF4;
+      --ink-2: #9C95B3;
+      --line: #363048;
+      --hema: #A497DD;
+      --hema-soft: #2C2545;
+      --eosin: #D9829D;
+      --pass: #6DBD97;
+      --pass-soft: #1E3A2E;
+      --warn: #D69A55;
+      --warn-soft: #3A2D1B;
+      --cell-strong: #6E5BBF;
+      --cell-weak: #2A2540;
+      --series-warm: #8578CC;
+      --series-cold: #D55E82;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 28px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #171420;
+    --surface: #1F1B2C;
+    --surface-2: #282338;
+    --ink: #EDEAF4;
+    --ink-2: #9C95B3;
+    --line: #363048;
+    --hema: #A497DD;
+    --hema-soft: #2C2545;
+    --eosin: #D9829D;
+    --pass: #6DBD97;
+    --pass-soft: #1E3A2E;
+    --warn: #D69A55;
+    --warn-soft: #3A2D1B;
+    --cell-strong: #6E5BBF;
+    --cell-weak: #2A2540;
+    --series-warm: #8578CC;
+    --series-cold: #D55E82;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 28px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    font-size: 17.5px;
+    line-height: 1.6;
+  }
+  .slide {
+    min-height: 92vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4.5rem 1.5rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .slide-inner { width: 100%; max-width: 780px; }
+
+  .eyebrow {
+    display: flex; align-items: baseline; gap: .75rem;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .78rem; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink-2); margin-bottom: 1.4rem;
+  }
+  .eyebrow .num { color: var(--eosin); font-weight: 600; }
+
+  h1, h2 {
+    font-family: "Fraunces", Georgia, serif;
+    font-weight: 560; line-height: 1.12; text-wrap: balance;
+    margin: 0 0 1.2rem;
+  }
+  h1 { font-size: clamp(2.4rem, 6vw, 3.6rem); font-weight: 640; }
+  h2 { font-size: clamp(1.7rem, 4vw, 2.3rem); }
+  p { max-width: 58ch; margin: 0 0 1rem; }
+  .lede { font-size: 1.15rem; color: var(--ink-2); max-width: 54ch; }
+  strong { font-weight: 700; }
+  .accent { color: var(--hema); }
+  .mono { font-family: "IBM Plex Mono", monospace; font-size: .92em; }
+  code {
+    font-family: "IBM Plex Mono", monospace; font-size: .86em;
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 4px; padding: .08em .35em;
+  }
+
+  .chip {
+    display: inline-block; font-family: "IBM Plex Mono", monospace;
+    font-size: .74rem; font-weight: 600; letter-spacing: .1em; text-transform: uppercase;
+    padding: .28em .7em; border-radius: 999px; margin-right: .4rem;
+  }
+  .chip.pass { background: var(--pass-soft); color: var(--pass); }
+  .chip.warn { background: var(--warn-soft); color: var(--warn); }
+  .chip.hema { background: var(--hema-soft); color: var(--hema); }
+
+  .big-claim {
+    font-family: "Fraunces", Georgia, serif; font-size: clamp(1.35rem, 3vw, 1.75rem);
+    font-weight: 560; line-height: 1.35; text-wrap: balance;
+    border-left: 3px solid var(--eosin); padding-left: 1.1rem; margin: 1.8rem 0;
+  }
+
+  table { border-collapse: collapse; width: 100%; margin: 1.4rem 0 .4rem; font-size: .95rem; }
+  th, td { text-align: left; padding: .55rem .8rem; border-bottom: 1px solid var(--line); }
+  th { font-size: .76rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); font-weight: 700; }
+  td.num, th.num { text-align: right; font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; font-size: .9rem; }
+  .table-scroll { overflow-x: auto; }
+  .footnote { font-size: .88rem; color: var(--ink-2); max-width: 58ch; }
+
+  .matrix-wrap { margin: 1.8rem 0 .6rem; overflow-x: auto; }
+  .matrix {
+    display: grid; grid-template-columns: 7.5rem repeat(3, minmax(9rem, 1fr));
+    gap: 6px; min-width: 540px;
+  }
+  .m-corner, .m-head {
+    font-family: "IBM Plex Mono", monospace; font-size: .74rem;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2);
+    display: flex; align-items: center; padding: .3rem .5rem;
+  }
+  .m-head { justify-content: center; }
+  .m-cell {
+    border-radius: 10px; padding: .85rem .6rem; text-align: center;
+    background: var(--cell-weak); border: 1px solid var(--line);
+  }
+  .m-cell .auc {
+    font-family: "IBM Plex Mono", monospace; font-size: 1.35rem; font-weight: 600;
+    font-variant-numeric: tabular-nums; display: block;
+  }
+  .m-cell .sub { font-family: "IBM Plex Mono", monospace; font-size: .72rem; color: var(--ink-2); display: block; margin-top: .18rem; }
+  .m-cell.strong { background: var(--cell-strong); border-color: var(--cell-strong); color: #fff; }
+  .m-cell.strong .sub { color: rgba(255,255,255,.85); }
+  .m-cell.self { background: var(--surface); border-style: dashed; }
+  .m-cell.self .auc { color: var(--ink-2); font-size: 1.05rem; }
+  .legend { display: flex; flex-wrap: wrap; gap: 1.2rem; font-size: .84rem; color: var(--ink-2); margin-top: .8rem; }
+  .legend span { display: inline-flex; align-items: center; gap: .45rem; }
+  .swatch { width: .9rem; height: .9rem; border-radius: 3px; border: 1px solid var(--line); display: inline-block; }
+  .swatch.strong { background: var(--cell-strong); border-color: var(--cell-strong); }
+  .swatch.weak { background: var(--cell-weak); }
+  .swatch.self { background: var(--surface); border-style: dashed; }
+
+  .cards { display: grid; gap: 1rem; margin: 1.6rem 0 0; }
+  .card {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 12px; padding: 1.15rem 1.3rem; box-shadow: var(--shadow);
+  }
+  .card h3 { margin: 0 0 .4rem; font-size: 1.02rem; font-weight: 700; }
+  .card p { font-size: .97rem; margin-bottom: 0; max-width: none; }
+
+  ol.steps, ul.tight { margin: 1rem 0 0; padding-left: 1.3rem; max-width: 58ch; }
+  ol.steps li, ul.tight li { margin-bottom: .6rem; }
+
+  .kicker-nav {
+    position: fixed; bottom: 1rem; right: 1.2rem;
+    font-family: "IBM Plex Mono", monospace; font-size: .72rem; color: var(--ink-2);
+    background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
+    padding: .3em .9em; box-shadow: var(--shadow); user-select: none;
+  }
+  @media (max-width: 640px) { .kicker-nav { display: none; } }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+
+<div class="deck">
+
+<!-- 1 · Title -->
+<section class="slide" id="s1"><div class="slide-inner">
+  <div class="eyebrow"><span class="num">01</span><span>Project handover · Aug 2026</span></div>
+  <h1>Pan<span class="accent">Morph</span></h1>
+  <p class="lede">Can a model that reads tumor slides from one organ detect the same mutation in another organ?</p>
+  <p style="margin-top:1.6rem">We tested this for <strong>MSI</strong>, a mutation status that decides whether a patient gets immunotherapy.<br>
+  The answer so far: <strong>yes — for some organ pairs.</strong></p>
+  <p><span class="chip pass">Done · the transfer is proven</span><span class="chip hema">Next · measure its value</span></p>
+</div></section>
+
+<!-- 2 · Motivation -->
+<section class="slide" id="s2"><div class="slide-inner">
+  <div class="eyebrow"><span class="num">02</span><span>Motivation</span></div>
+  <h2>Why this question matters</h2>
+  <p>MSI testing needs a lab assay. Predicting it directly from routine H&amp;E slides would be cheaper and faster.
+  But for many organs, we have very few labeled cases to train on.</p>
+  <p><strong>The hope:</strong> borrow training data from other organs where labels are plentiful.</p>
+  <p><strong>The catch:</strong> an early pilot seemed to confirm the hope — until we noticed that adding foreign organs also multiplied the training data 20-fold. More data helps any model. That proves nothing about organs.</p>
+  <div class="big-claim">So the real question became: is there genuine shared tumor morphology across organs — or just more data and hidden shortcuts?</div>
+</div></section>
+
+<!-- 3 · Data -->
+<section class="slide" id="s3"><div class="slide-inner">
+  <div class="eyebrow"><span class="num">03</span><span>Data</span></div>
+  <h2>Three organs from TCGA</h2>
+  <p>Each patient is one slide embedding (from PRISM, a pathology foundation model) plus one MSI label.</p>
+  <div class="table-scroll"><table>
+    <tr><th>Organ</th><th class="num">Patients</th><th class="num">MSI-positive</th></tr>
+    <tr><td>Colon (COAD)</td><td class="num">391</td><td class="num">74</td></tr>
+    <tr><td>Stomach (STAD)</td><td class="num">371</td><td class="num">63</td></tr>
+    <tr><td>Endometrium (UCEC)</td><td class="num">487</td><td class="num">155</td></tr>
+  </table></div>
+  <p style="margin-top:1.2rem">One property makes this dataset special: the three cohorts come from <strong>completely different hospitals</strong> — zero overlap.
+  So a model cannot succeed on a new organ by recognizing hospital fingerprints.</p>
+  <p class="footnote">Prostate and bladder were considered too, but each has only ~3 MSI-positive cases. Not usable.</p>
+</div></section>
+
+<!-- 4 · Experiments -->
+<section class="slide" id="s4"><div class="slide-inner">
+  <div class="eyebrow"><span class="num">04</span><span>Experiments</span></div>
+  <h2>One clean test, decided in advance</h2>
+  <p>The experiment is simple by design: train a small classifier on one organ, then test it on another organ it has <strong>never seen</strong>.</p>
+  <p>Before running anything, we wrote down what would count as success, and we guarded against the two ways to be fooled:</p>
+  <div class="cards">
+    <div class="card"><h3>More data ≠ transfer</h3>
+      <p>The target organ contributes zero training data. Any performance there must come from what the model learned elsewhere.</p></div>
+    <div class="card"><h3>Hospital fingerprints ≠ transfer</h3>
+      <p>Hospitals <em>are</em> recognizable in these embeddings — we checked. But the organs come from disjoint hospitals, so that trick cannot work here.</p></div>
+  </div>
+</div></section>
+
+<!-- 5 · Results -->
+<section class="slide" id="s5"><div class="slide-inner">
+  <div class="eyebrow"><span class="num">05</span><span>Results</span></div>
+  <h2>The transfer is real — between GI organs</h2>
+  <div class="matrix-wrap"><div class="matrix">
+    <div class="m-corner">trained on ↓</div>
+    <div class="m-head">→ Colon</div><div class="m-head">→ Stomach</div><div class="m-head">→ Endometrium</div>
+    <div class="m-corner">Colon</div>
+    <div class="m-cell self"><span class="auc">0.77</span><span class="sub">itself</span></div>
+    <div class="m-cell strong"><span class="auc">0.76</span><span class="sub">transfers ✓</span></div>
+    <div class="m-cell"><span class="auc">0.59</span><span class="sub">no</span></div>
+    <div class="m-corner">Stomach</div>
+    <div class="m-cell strong"><span class="auc">0.74</span><span class="sub">transfers ✓</span></div>
+    <div class="m-cell self"><span class="auc">0.86</span><span class="sub">itself</span></div>
+    <div class="m-cell"><span class="auc">0.59</span><span class="sub">no</span></div>
+    <div class="m-corner">Endometrium</div>
+    <div class="m-cell"><span class="auc">0.57</span><span class="sub">no</span></div>
+    <div class="m-cell"><span class="auc">0.52</span><span class="sub">no</span></div>
+    <div class="m-cell self"><span class="auc">0.76</span><span class="sub">itself</span></div>
+  </div></div>
+  <div class="legend">
+    <span><span class="swatch strong"></span>significant transfer (AUC)</span>
+    <span><span class="swatch weak"></span>no significant transfer</span>
+    <span><span class="swatch self"></span>organ tested on itself, for reference</span>
+  </div>
+  <p style="margin-top:1.4rem">Read one row: a model trained only on <strong>stomach</strong> scores <strong>0.74</strong> on colon — almost as good as colon's own <strong>0.77</strong>. Without ever seeing a colon slide.</p>
+</div></section>
+
+<!-- 6 · What it means -->
+<section class="slide" id="s6"><div class="slide-inner">
+  <div class="eyebrow"><span class="num">06</span><span>Takeaway</span></div>
+  <h2>Transfer exists, and it has structure</h2>
+  <ul class="tight">
+    <li><strong>Colon ↔ stomach works, both ways.</strong> Biologically plausible: both are GI cancers with the same MSI mechanism.</li>
+    <li><strong>Endometrium stands apart.</strong> MSI is predictable <em>within</em> it, but nothing transfers in or out. Transfer is organ-dependent — that is a finding, not a failure.</li>
+    <li><strong>The controls held.</strong> Neither data volume nor hospital shortcuts explain the result.</li>
+  </ul>
+  <div class="big-claim">The closest published study, using older methods, found no usable transfer on these same organs. Foundation-model embeddings changed the answer.</div>
+</div></section>
+
+<!-- 7 · The value question -->
+<section class="slide" id="s7"><div class="slide-inner">
+  <div class="eyebrow"><span class="num">07</span><span>Next · the value question</span></div>
+  <h2>What is a foreign organ worth?</h2>
+  <p>Picture a hospital that wants a stomach MSI model but can only afford to assay a handful of its own cases.
+  Two ways to start:</p>
+  <p><strong style="color:var(--series-warm)">Warm start</strong> — begin from the colon-trained model, add the few local cases.<br>
+  <strong style="color:var(--series-cold)">Cold start</strong> — train from scratch on the local cases alone.</p>
+  <p>The experiment sweeps the number of local cases and compares the two curves. We expect:</p>
+  <figure style="margin:1.6rem 0 0; background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:1.2rem 1rem .8rem; box-shadow:var(--shadow); overflow-x:auto;">
+    <svg viewBox="0 0 560 290" role="img" aria-label="Expected result: the warm-start curve begins high where the cold-start curve begins at chance; the gap between them is the value of the foreign organ." style="width:100%; min-width:480px; display:block; font-family:'IBM Plex Mono',monospace;">
+      <!-- axes -->
+      <line x1="60" y1="250" x2="530" y2="250" stroke="var(--line)" stroke-width="1.5"/>
+      <line x1="60" y1="40" x2="60" y2="250" stroke="var(--line)" stroke-width="1.5"/>
+      <text x="56" y="254" text-anchor="end" font-size="11" fill="var(--ink-2)">chance</text>
+      <text x="56" y="70" text-anchor="end" font-size="11" fill="var(--ink-2)">0.76</text>
+      <text x="60" y="272" text-anchor="middle" font-size="11" fill="var(--ink-2)">0</text>
+      <text x="530" y="272" text-anchor="end" font-size="11" fill="var(--ink-2)">local labeled cases →</text>
+      <!-- gap shading -->
+      <path d="M60,250 C170,130 280,80 520,62 L520,54 C350,56 200,60 60,68 Z" fill="var(--series-warm)" opacity="0.10"/>
+      <!-- k* marker -->
+      <line x1="332" y1="66" x2="332" y2="250" stroke="var(--ink-2)" stroke-width="1" stroke-dasharray="3 4" opacity="0.7"/>
+      <text x="332" y="266" text-anchor="middle" font-size="11" fill="var(--ink-2)">cases needed to catch up</text>
+      <!-- curves -->
+      <path d="M60,250 C170,130 280,80 520,62" fill="none" stroke="var(--series-cold)" stroke-width="2.5" stroke-dasharray="7 5" stroke-linecap="round"/>
+      <path d="M60,68 C200,60 350,56 520,54" fill="none" stroke="var(--series-warm)" stroke-width="2.5" stroke-linecap="round"/>
+      <!-- direct labels -->
+      <text x="88" y="52" font-size="12.5" fill="var(--series-warm)" font-weight="600">warm start — begins where zero-shot left off</text>
+      <text x="216" y="152" font-size="12.5" fill="var(--series-cold)" font-weight="600">cold start — begins at chance</text>
+      <!-- start markers -->
+      <circle cx="60" cy="68" r="4.5" fill="var(--series-warm)" stroke="var(--surface)" stroke-width="2"/>
+      <circle cx="60" cy="250" r="4.5" fill="var(--series-cold)" stroke="var(--surface)" stroke-width="2"/>
+    </svg>
+    <figcaption class="footnote" style="margin-top:.6rem; text-align:center;">Sketch of the expected curves — not measured data yet.</figcaption>
+  </figure>
+  <p style="margin-top:1.4rem">The gap between the curves <strong>is</strong> the value of the foreign organ — expressed in the most practical unit there is: <em>local labeled cases saved</em>. The experiment (E1) is fully specified, ready to build.</p>
+</div></section>
+
+<!-- 8 · Stronger models -->
+<section class="slide" id="s8"><div class="slide-inner">
+  <div class="eyebrow"><span class="num">08</span><span>Next · stronger models</span></div>
+  <h2>Does a better model change the picture?</h2>
+  <p>Everything so far uses the simplest possible setup: frozen embeddings plus a linear classifier.
+  That was the right choice for a clean proof. It also leaves obvious headroom:</p>
+  <ul class="tight">
+    <li>Swap in a newer foundation model (e.g. <strong>PRISM2</strong>).</li>
+    <li>Go below the slide level: a <strong>tile encoder with a trainable MIL aggregator</strong>, instead of one pre-pooled vector per patient.</li>
+  </ul>
+  <p>The most interesting outcome would be a surprise: if a stronger model makes <strong>endometrium</strong> start transferring, its wall was a limitation of our representation — not of biology.</p>
+</div></section>
+
+<!-- 9 · Appendix -->
+<section class="slide" id="s9"><div class="slide-inner">
+  <div class="eyebrow"><span class="num">A</span><span>Appendix · Where everything lives</span></div>
+  <h2>Getting started</h2>
+  <div class="table-scroll"><table>
+    <tr><td>Repo (code, docs, results)</td><td class="mono">/data/pathology/projects/clement/code/panmorph</td></tr>
+    <tr><td>Start reading here</td><td class="mono">README.md</td></tr>
+    <tr><td>Full plan for Phase 2</td><td>GitHub issue <span class="mono">panmorph#1</span></td></tr>
+    <tr><td>Raw data</td><td class="mono">/data/pathology/projects/clement/mutation-prediction/</td></tr>
+  </table></div>
+  <p style="margin-top:1.2rem">Reproduce the main result in one command:</p>
+  <p><code>python experiments/run_gate.py --quick</code></p>
+  <p class="lede" style="margin-top:1.6rem">The hard part — proving the transfer is real — is done. The next result is waiting to be computed.</p>
+</div></section>
+
+</div>
+<div class="kicker-nav">↑ / ↓ to navigate</div>
+
+<script>
+  (function () {
+    var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+    function currentIndex() {
+      var mid = window.scrollY + window.innerHeight / 2;
+      for (var i = slides.length - 1; i >= 0; i--) {
+        if (slides[i].offsetTop <= mid) return i;
+      }
+      return 0;
+    }
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'PageDown' && e.key !== 'PageUp') return;
+      var i = currentIndex();
+      var next = (e.key === 'ArrowDown' || e.key === 'PageDown') ? Math.min(i + 1, slides.length - 1) : Math.max(i - 1, 0);
+      slides[next].scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      e.preventDefault();
+    });
+  })();
+</script>

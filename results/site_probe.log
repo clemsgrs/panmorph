@@ -1,0 +1,4 @@
+organ      site bal-acc   chance  majority  sites>=8     n
+COAD        0.606±0.059    0.077     0.329        13   371
+UCEC        0.582±0.014    0.071     0.167        14   456
+STAD        0.734±0.057    0.125     0.340         8   332

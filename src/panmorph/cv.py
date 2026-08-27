@@ -5,7 +5,7 @@ pooled OOF). Random-CV is kept only as the site-inflated contrast. We always poo
 out-of-fold predictions and compute one AUC over the full cohort — never average
 per-fold AUCs (a positive-light fold would yield a garbage per-fold AUC). The only
 real failure mode is a *training* fold starved of positives, which the guard catches.
-See docs/methods-notes.md.
+See README.md.
 """
 from __future__ import annotations
 
