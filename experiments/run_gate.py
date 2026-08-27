@@ -1,6 +1,6 @@
 """Run the cross-organ MSI transfer GATE.
 
-Three components (see docs/experimental-design.md):
+Three components (see README.md):
   1. Within-organ ceiling  : leave-site-out pooled OOF AUC (honest) + random-CV (contrast)
   2. Zero-shot matrix       : source organ(s) -> never-seen target; pooled target AUC + bootstrap CI
   3. Permutation null       : within-source label shuffle -> empirical p per cell

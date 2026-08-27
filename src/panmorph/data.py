@@ -2,7 +2,7 @@
 
 Each cohort has one 1280-dim PRISM embedding per patient (all of a patient's slides
 already aggregated into a single .pt), so there is no same-patient slide leakage.
-See docs/data.md for the verified inventory.
+See README.md for the verified inventory.
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ FEATURES = ROOT / "features" / "prism"
 CSVS = ROOT / "csvs"
 
 # cohort -> (label csv, label column, feature directory). MSI gate cohorts only.
-# BLCA-MSI and PRAD-MSI are excluded: ~3 positives each (dead). See docs/data.md.
+# BLCA-MSI and PRAD-MSI are excluded: ~3 positives each (dead). See README.md.
 MSI_COHORTS: dict[str, tuple[Path, str, Path]] = {
     "COAD": (CSVS / "tcga-coad/dx+msi.csv", "msi_high", FEATURES / "lxbzb8rd/features"),
     "UCEC": (CSVS / "tcga-ucec/dx+msi.csv", "msi_high", FEATURES / "kooqa1ym/features"),
@@ -92,7 +92,7 @@ def load_all(registry: dict = MSI_COHORTS) -> dict[str, Cohort]:
 
 def shared_sites(cohorts: dict[str, Cohort]) -> dict[tuple[str, str], list[str]]:
     """Pairwise TSS overlap between cohorts. Empty everywhere => the gate's
-    site-shortcut immunity holds by construction (see docs/methods-notes.md)."""
+    site-shortcut immunity holds by construction (see README.md)."""
     out = {}
     for a, b in itertools.combinations(cohorts, 2):
         out[(a, b)] = sorted(set(cohorts[a].sites) & set(cohorts[b].sites))

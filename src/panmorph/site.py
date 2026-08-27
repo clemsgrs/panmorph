@@ -2,7 +2,7 @@
 
 This is a *confound diagnostic* — it motivates confound 2 (the site shortcut) that the
 gate must defeat. It is NOT part of the gate decision; the gate defeats the site
-shortcut structurally via cross-cohort TSS-disjointness (see docs/methods-notes.md).
+shortcut structurally via cross-cohort TSS-disjointness (see README.md).
 """
 from __future__ import annotations
 
