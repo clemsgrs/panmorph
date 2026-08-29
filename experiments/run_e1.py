@@ -24,6 +24,7 @@ from panmorph.e1 import (  # noqa: E402
     run_e1_matrix,
     validate_phase1_anchors,
 )
+from panmorph.e1_runner import DEFAULT_WORKERS, run_e1_bundle  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -208,45 +209,14 @@ def write_registered_inference(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--out", type=Path, default=ROOT / "results")
-    parser.add_argument(
-        "--phase1", type=Path, default=ROOT / "results" / "gate_results.csv"
-    )
-    parser.add_argument(
-        "--predictions",
-        type=Path,
-        default=ROOT / "results" / "e1_predictions.csv",
-        help="stored issue-#6 prediction table to summarize",
-    )
-    parser.add_argument(
-        "--generate",
-        action="store_true",
-        help="explicitly regenerate the issue-#6 matrix before inference",
-    )
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--out", type=Path, default=ROOT / "results" / "e1")
+    parser.add_argument("--profile", choices=("quick", "full"), default="full")
+    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
     args = parser.parse_args()
-
-    cohorts = load_all()
-    if args.generate:
-        result = run_e1_matrix(cohorts)
-        write_reportable_results(result, args.phase1, args.out)
-        predictions = read_prediction_records(args.out / "e1_predictions.csv")
-    else:
-        predictions = read_prediction_records(args.predictions)
-        args.out.mkdir(parents=True, exist_ok=True)
-    source_case_counts = count_source_cases(
-        cohorts,
-        {record.source for record in predictions if record.arm == "warm"},
-    )
-    inference = estimate_e1_matrix(predictions, source_case_counts)
-    confirmatory = run_confirmatory_test(
-        cohorts["COAD"], cohorts["STAD"], predictions
-    )
-    write_registered_inference(inference, confirmatory, args.out)
-    print(
-        f"Saved {len(inference.cells)} registered cell estimates and "
-        f"{len(inference.equivalences)} equivalence estimates to {args.out}"
-    )
+    run_e1_bundle(args.out, profile=args.profile, workers=args.workers)
+    label = "REPORTABLE" if args.profile == "full" else "NON-REPORTABLE"
+    print(f"Saved validated E1 {args.profile} bundle ({label}) to {args.out}")
 
 
 if __name__ == "__main__":

@@ -284,6 +284,7 @@ def stratified_bootstrap_indices(
     *,
     seed: int = 0,
     key: tuple[str, ...] = (),
+    n_replicates: int = BOOTSTRAP_REPLICATES,
 ) -> np.ndarray:
     """Return a deterministic label-stratified patient bootstrap schedule."""
     labels = np.asarray(labels)
@@ -297,7 +298,7 @@ def stratified_bootstrap_indices(
             np.concatenate(
                 [rng.choice(indices, size=len(indices), replace=True) for indices in strata]
             )
-            for _ in range(BOOTSTRAP_REPLICATES)
+            for _ in range(n_replicates)
         ],
         dtype=int,
     )
@@ -331,11 +332,12 @@ def source_label_permutations(
     source: str,
     *,
     seed: int = 0,
+    n_permutations: int = PERMUTATION_COUNT,
 ) -> np.ndarray:
     """Generate keyed source-label permutations without changing prevalence."""
     labels = np.asarray(labels)
     rng = _keyed_rng(seed, "permutation", source)
-    return np.asarray([rng.permutation(labels) for _ in range(PERMUTATION_COUNT)])
+    return np.asarray([rng.permutation(labels) for _ in range(n_permutations)])
 
 
 def empirical_superiority_p(observed: float, null: np.ndarray) -> float:
@@ -351,6 +353,8 @@ def run_confirmatory_test(
     *,
     seed: int = 0,
     n_jobs: int = -1,
+    draw_ids: tuple[int, ...] = E1_DRAW_IDS,
+    n_permutations: int = PERMUTATION_COUNT,
 ) -> ConfirmatoryResult:
     """Run the one registered 999-permutation mean-lift superiority test."""
     if not is_confirmatory_cell(source.name, target.name, 10):
@@ -373,18 +377,20 @@ def run_confirmatory_test(
     )
     warm_by_draw = {record.draw_seed: record.raw_auc for record in observed_warm}
     cold_by_draw = {record.draw_seed: record.raw_auc for record in observed_cold}
-    if tuple(sorted(warm_by_draw)) != E1_DRAW_IDS or warm_by_draw.keys() != cold_by_draw.keys():
-        raise ValueError("confirmatory predictions require all twenty fixed paired draws")
+    if tuple(sorted(warm_by_draw)) != draw_ids or warm_by_draw.keys() != cold_by_draw.keys():
+        raise ValueError("confirmatory predictions require the complete fixed paired draws")
     observed_lift = float(
-        np.mean([warm_by_draw[draw] - cold_by_draw[draw] for draw in E1_DRAW_IDS])
+        np.mean([warm_by_draw[draw] - cold_by_draw[draw] for draw in draw_ids])
     )
 
-    permutations = source_label_permutations(source.y, source.name, seed=seed)
+    permutations = source_label_permutations(
+        source.y, source.name, seed=seed, n_permutations=n_permutations
+    )
 
     def null_lift(shuffled_labels: np.ndarray) -> float:
         shuffled_source = replace(source, y=shuffled_labels)
         warm_aucs = []
-        for draw in E1_DRAW_IDS:
+        for draw in draw_ids:
             result = trace_paired_cell(
                 shuffled_source, target, 10, draw, arms=("warm",)
             )
@@ -435,6 +441,8 @@ def estimate_e1_cell(
     k: Rung,
     *,
     seed: int = 0,
+    draw_ids: tuple[int, ...] = E1_DRAW_IDS,
+    n_bootstraps: int = BOOTSTRAP_REPLICATES,
 ) -> CellEstimate:
     """Estimate mean arm AUCs and paired lift from stored OOF predictions."""
     warm = [
@@ -454,7 +462,7 @@ def estimate_e1_cell(
     warm_draws = tuple(sorted({record.draw_seed for record in warm}, key=str))
     cold_draws = tuple(sorted({record.draw_seed for record in cold}, key=str))
     expected_draws: tuple[int | None, ...] = (
-        (None,) if k in (0, "all") else E1_DRAW_IDS
+        (None,) if k in (0, "all") else draw_ids
     )
     if warm_draws != cold_draws or set(warm_draws) != set(expected_draws):
         raise ValueError("warm and cold arms must use the complete fixed draw schedule")
@@ -482,7 +490,7 @@ def estimate_e1_cell(
     point_warm = float(np.mean([_binary_auc(labels, scores) for scores in warm_scores]))
     point_cold = float(np.mean([_binary_auc(labels, scores) for scores in cold_scores]))
     schedule = stratified_bootstrap_indices(
-        labels, seed=seed, key=(target,)
+        labels, seed=seed, key=(target,), n_replicates=n_bootstraps
     )
     bootstrap_warm = np.mean(
         [_bootstrap_auc(labels, scores, schedule) for scores in warm_scores], axis=0
@@ -609,17 +617,18 @@ def summarize_equivalence_bootstrap(
     cold_bootstrap: Mapping[Rung, np.ndarray],
     all_coordinate: float,
     source_case_count: int,
+    n_bootstraps: int = BOOTSTRAP_REPLICATES,
 ) -> EquivalenceSummary:
     """Recompute equivalence per bootstrap and report its censored interval."""
     foreign_bootstrap = np.asarray(foreign_bootstrap)
-    if len(foreign_bootstrap) != BOOTSTRAP_REPLICATES:
-        raise ValueError(f"equivalence requires exactly {BOOTSTRAP_REPLICATES} bootstraps")
+    if len(foreign_bootstrap) != n_bootstraps:
+        raise ValueError(f"equivalence requires exactly {n_bootstraps} bootstraps")
     if source_case_count <= 0:
         raise ValueError("source_case_count must be positive")
     if set(cold_curve) != set(cold_bootstrap):
         raise ValueError("point and bootstrap cold curves must have identical rungs")
-    if any(len(np.asarray(values)) != BOOTSTRAP_REPLICATES for values in cold_bootstrap.values()):
-        raise ValueError(f"equivalence requires exactly {BOOTSTRAP_REPLICATES} bootstraps")
+    if any(len(np.asarray(values)) != n_bootstraps for values in cold_bootstrap.values()):
+        raise ValueError(f"equivalence requires exactly {n_bootstraps} bootstraps")
 
     point = local_positive_equivalence(
         foreign_only_auc, cold_curve, all_coordinate=all_coordinate
@@ -630,7 +639,7 @@ def summarize_equivalence_bootstrap(
             {k: float(values[index]) for k, values in cold_bootstrap.items()},
             all_coordinate=all_coordinate,
         )
-        for index in range(BOOTSTRAP_REPLICATES)
+        for index in range(n_bootstraps)
     )
     average_point = _scale_equivalence(point, source_case_count)
     average_bootstrap = tuple(
@@ -676,6 +685,8 @@ def estimate_e1_matrix(
     source_case_counts: Mapping[str, int],
     *,
     seed: int = 0,
+    draw_ids: tuple[int, ...] = E1_DRAW_IDS,
+    n_bootstraps: int = BOOTSTRAP_REPLICATES,
 ) -> E1Inference:
     """Turn the complete stored E1 predictions into registered estimates."""
     keys = {
@@ -684,7 +695,10 @@ def estimate_e1_matrix(
         if record.arm == "warm"
     }
     cells = tuple(
-        estimate_e1_cell(predictions, source, target, k, seed=seed)
+        estimate_e1_cell(
+            predictions, source, target, k, seed=seed,
+            draw_ids=draw_ids, n_bootstraps=n_bootstraps,
+        )
         for source, target, k in sorted(keys, key=lambda key: (key[1], key[0], str(key[2])))
     )
     pairs = sorted({(cell.source, cell.target) for cell in cells})
@@ -703,6 +717,7 @@ def estimate_e1_matrix(
             cold_bootstrap={k: cell.bootstrap_cold for k, cell in by_rung.items()},
             all_coordinate=_all_positive_coordinate(predictions, target),
             source_case_count=source_case_counts[source],
+            n_bootstraps=n_bootstraps,
         )
         equivalences.append(
             EquivalenceCellSummary(source, target, by_rung[0].base, summary)
