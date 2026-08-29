@@ -96,7 +96,7 @@ strongest clinical motivation.
 Experiment **E1**: sweep k added target positives (prevalence-matched draws).
 Compare warm start (begin from the foreign-organ model) against cold start (local cases only).
 The gap between the curves is the value, in local labeled cases saved.
-Pre-registered confirmatory cell: **COAD→STAD, pooled base, k=10**
+Pre-registered confirmatory cell: **single-source COAD→STAD, k=10**
 (≈ a realistic 50-case local annotation budget).
 Statistic: paired lift Δ(k), averaged over fixed draw seeds; per-organ label-permutation null.
 Full specification: GitHub issue [panmorph#1](https://github.com/clemsgrs/panmorph/issues/1).
@@ -106,6 +106,11 @@ The registered matrix runner expands that seam over every single-source and pool
 all-non-target base for COAD, STAD, and UCEC. It writes separate audit, prediction,
 and pooled-AUC tables only after its deterministic endpoints reproduce the committed
 Phase-1 results within `1e-6`.
+Registered inference then uses 2,000 paired, label-stratified patient bootstraps for
+mean raw warm/cold AUC and lift intervals. It reports rank sensitivity as a point plus
+flag, derives local-positive equivalence from the equal-weight isotonic cold curve with
+explicit censoring at `all`, and runs only the single-source COAD→STAD `k=10` test with
+999 coherent COAD-label permutations and the plus-one empirical p-value.
 
 **RQ2 (secondary): does a stronger model change the picture?**
 Try a newer foundation model (e.g. PRISM2) or a tile encoder with a trainable MIL
@@ -143,6 +148,7 @@ It becomes a real question only after more MSI-labeled organs join the matrix.
 python experiments/run_gate.py           # full gate: 1000 perms, 2000 bootstraps
 python experiments/run_gate.py --quick   # smoke test
 python experiments/run_site_probe.py     # site-decodability diagnostic
-python experiments/run_e1.py             # full registered E1 matrix (20 paired draws)
+python experiments/run_e1.py --generate  # generate the full E1 matrix, then infer
+python experiments/run_e1.py             # infer from stored issue-#6 predictions
 python -m pytest                         # deterministic synthetic test suite
 ```
