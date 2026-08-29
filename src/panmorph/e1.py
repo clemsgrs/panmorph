@@ -8,15 +8,16 @@ from typing import Iterable, Literal, Mapping
 
 import numpy as np
 from joblib import Parallel, delayed
+from sklearn.isotonic import IsotonicRegression
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import GroupKFold
-from sklearn.isotonic import IsotonicRegression
 
 from .data import Cohort
 from .probe import fit_predict
 
 Arm = Literal["warm", "cold"]
 Origin = Literal["source", "target"]
+Base = Literal["single", "pooled"]
 Rung = int | Literal["all"]
 E1_RUNGS: tuple[Rung, ...] = (0, 3, 5, 10, 25, 40, "all")
 E1_DRAW_IDS: tuple[int, ...] = tuple(range(20))
@@ -106,7 +107,7 @@ class CellEstimate:
 
     source: str
     target: str
-    base: Literal["single", "pooled"]
+    base: Base
     k: Rung
     n_draws: int
     warm: IntervalEstimate
@@ -120,7 +121,6 @@ class CellEstimate:
     bootstrap_cold: np.ndarray
     bootstrap_lift: np.ndarray
     confirmatory: bool
-    permutation_p: float | None
 
 
 @dataclass(frozen=True)
@@ -171,7 +171,7 @@ class ConfirmatoryResult:
 class EquivalenceCellSummary:
     source: str
     target: str
-    base: Literal["single", "pooled"]
+    base: Base
     local_positive: EquivalenceSummary
 
 
@@ -284,7 +284,6 @@ def stratified_bootstrap_indices(
     *,
     seed: int = 0,
     key: tuple[str, ...] = (),
-    n_boot: int = BOOTSTRAP_REPLICATES,
 ) -> np.ndarray:
     """Return a deterministic label-stratified patient bootstrap schedule."""
     labels = np.asarray(labels)
@@ -298,7 +297,7 @@ def stratified_bootstrap_indices(
             np.concatenate(
                 [rng.choice(indices, size=len(indices), replace=True) for indices in strata]
             )
-            for _ in range(n_boot)
+            for _ in range(BOOTSTRAP_REPLICATES)
         ],
         dtype=int,
     )
@@ -306,8 +305,25 @@ def stratified_bootstrap_indices(
 
 def is_confirmatory_cell(source: str, target: str, k: Rung) -> bool:
     """Return whether this is the sole registered confirmatory E1 cell."""
-    base = "pooled" if "+" in source else "single"
-    return (source, target, base, k) == CONFIRMATORY_CELL
+    return (source, target, _source_base(source), k) == CONFIRMATORY_CELL
+
+
+def _source_members(source: str) -> tuple[str, ...]:
+    return tuple(source.split("+"))
+
+
+def _source_base(source: str) -> Base:
+    return "pooled" if len(_source_members(source)) > 1 else "single"
+
+
+def count_source_cases(
+    cohorts: Mapping[str, Cohort], sources: Iterable[str]
+) -> dict[str, int]:
+    """Count source patients for single and pooled E1 bases."""
+    return {
+        source: sum(cohorts[name].n for name in _source_members(source))
+        for source in sources
+    }
 
 
 def source_label_permutations(
@@ -315,12 +331,11 @@ def source_label_permutations(
     source: str,
     *,
     seed: int = 0,
-    n_permutations: int = PERMUTATION_COUNT,
 ) -> np.ndarray:
     """Generate keyed source-label permutations without changing prevalence."""
     labels = np.asarray(labels)
     rng = _keyed_rng(seed, "permutation", source)
-    return np.asarray([rng.permutation(labels) for _ in range(n_permutations)])
+    return np.asarray([rng.permutation(labels) for _ in range(PERMUTATION_COUNT)])
 
 
 def empirical_superiority_p(observed: float, null: np.ndarray) -> float:
@@ -420,7 +435,6 @@ def estimate_e1_cell(
     k: Rung,
     *,
     seed: int = 0,
-    n_boot: int = BOOTSTRAP_REPLICATES,
 ) -> CellEstimate:
     """Estimate mean arm AUCs and paired lift from stored OOF predictions."""
     warm = [
@@ -439,8 +453,11 @@ def estimate_e1_cell(
         raise ValueError(f"missing paired predictions for {source} -> {target} at k={k}")
     warm_draws = tuple(sorted({record.draw_seed for record in warm}, key=str))
     cold_draws = tuple(sorted({record.draw_seed for record in cold}, key=str))
-    if warm_draws != cold_draws:
-        raise ValueError("warm and cold arms must use identical fixed draw IDs")
+    expected_draws: tuple[int | None, ...] = (
+        (None,) if k in (0, "all") else E1_DRAW_IDS
+    )
+    if warm_draws != cold_draws or set(warm_draws) != set(expected_draws):
+        raise ValueError("warm and cold arms must use the complete fixed draw schedule")
 
     case_ids = tuple(sorted({record.case_id for record in warm}))
     warm_scores: list[np.ndarray] = []
@@ -465,7 +482,7 @@ def estimate_e1_cell(
     point_warm = float(np.mean([_binary_auc(labels, scores) for scores in warm_scores]))
     point_cold = float(np.mean([_binary_auc(labels, scores) for scores in cold_scores]))
     schedule = stratified_bootstrap_indices(
-        labels, seed=seed, key=(target,), n_boot=n_boot
+        labels, seed=seed, key=(target,)
     )
     bootstrap_warm = np.mean(
         [_bootstrap_auc(labels, scores, schedule) for scores in warm_scores], axis=0
@@ -482,7 +499,7 @@ def estimate_e1_cell(
     return CellEstimate(
         source=source,
         target=target,
-        base="pooled" if "+" in source else "single",
+        base=_source_base(source),
         k=k,
         n_draws=len(warm_draws),
         warm=_interval(point_warm, bootstrap_warm),
@@ -491,12 +508,17 @@ def estimate_e1_cell(
         rank_warm=warm_rank,
         rank_cold=cold_rank,
         rank_lift=rank_lift,
-        rank_diverged=rank_auc_diverged(point_lift, rank_lift),
+        rank_diverged=any(
+            (
+                rank_auc_diverged(point_warm, warm_rank),
+                rank_auc_diverged(point_cold, cold_rank),
+                rank_auc_diverged(point_lift, rank_lift),
+            )
+        ),
         bootstrap_warm=bootstrap_warm,
         bootstrap_cold=bootstrap_cold,
         bootstrap_lift=bootstrap_lift,
         confirmatory=is_confirmatory_cell(source, target, k),
-        permutation_p=None,
     )
 
 
@@ -665,7 +687,6 @@ def estimate_e1_matrix(
         estimate_e1_cell(predictions, source, target, k, seed=seed)
         for source, target, k in sorted(keys, key=lambda key: (key[1], key[0], str(key[2])))
     )
-    by_key = {(cell.source, cell.target, cell.k): cell for cell in cells}
     pairs = sorted({(cell.source, cell.target) for cell in cells})
     equivalences = []
     for source, target in pairs:

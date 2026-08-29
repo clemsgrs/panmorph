@@ -5,8 +5,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 import panmorph.e1 as e1_module
+from joblib import parallel_config
 
-from experiments.run_e1 import write_registered_inference
+from experiments.run_e1 import read_prediction_records, write_registered_inference
 from panmorph.data import Cohort
 from panmorph.e1 import (
     BOOTSTRAP_REPLICATES,
@@ -47,6 +48,29 @@ def test_registered_bootstrap_schedule_is_stratified_and_keyed() -> None:
     assert len(set(schedule[0])) < len(schedule[0])
 
 
+def test_stored_prediction_reader_restores_the_issue_six_schema(tmp_path: Path) -> None:
+    path = tmp_path / "e1_predictions.csv"
+    path.write_text(
+        "draw_seed,k,fold,held_out_sites,arm,source,target,case_id,label,score\n"
+        '7,10,2,"(\'A\', \'B\')",warm,COAD,STAD,P01,1,0.75\n'
+    )
+
+    (record,) = read_prediction_records(path)
+
+    assert record == PredictionRecord(
+        draw_seed=7,
+        k=10,
+        fold=2,
+        held_out_sites=("A", "B"),
+        arm="warm",
+        source="COAD",
+        target="STAD",
+        case_id="P01",
+        label=1,
+        score=0.75,
+    )
+
+
 def _cell_predictions() -> tuple[PredictionRecord, ...]:
     labels = (0, 0, 1, 1)
     scores = {
@@ -68,9 +92,9 @@ def _cell_predictions() -> tuple[PredictionRecord, ...]:
             label=label,
             score=score,
         )
-        for draw in (0, 1)
+        for draw in E1_DRAW_IDS
         for arm in ("cold", "warm")
-        for index, (label, score) in enumerate(zip(labels, scores[(draw, arm)]))
+        for index, (label, score) in enumerate(zip(labels, scores[(draw % 2, arm)]))
     )
 
 
@@ -79,23 +103,32 @@ def test_cell_estimate_pairs_patients_and_fixed_draws_for_raw_auc_intervals() ->
         _cell_predictions(), "SOURCE", "TARGET", 10, seed=23
     )
 
-    assert estimate.n_draws == 2
+    assert estimate.n_draws == 20
     assert estimate.warm.point == 0.875
     assert estimate.cold.point == 0.375
     assert estimate.lift.point == 0.5
     assert len(estimate.bootstrap_warm) == 2_000
-    assert np.array_equal(
-        estimate.bootstrap_lift,
-        estimate.bootstrap_warm - estimate.bootstrap_cold,
-    )
-    assert estimate.warm.lower == np.percentile(estimate.bootstrap_warm, 2.5)
-    assert estimate.warm.upper == np.percentile(estimate.bootstrap_warm, 97.5)
+    assert estimate.bootstrap_warm[:4].tolist() == [1.0, 0.875, 1.0, 0.75]
+    assert estimate.bootstrap_cold[:4].tolist() == [0.5, 0.375, 0.5, 0.25]
+    assert np.all(estimate.bootstrap_lift == 0.5)
+    assert (estimate.warm.lower, estimate.warm.upper) == (0.5, 1.0)
+    assert (estimate.cold.lower, estimate.cold.upper) == (0.0, 0.5)
+    assert (estimate.lift.lower, estimate.lift.upper) == (0.5, 0.5)
     assert (estimate.rank_warm, estimate.rank_cold, estimate.rank_lift) == (
         1.0,
         0.5,
         0.5,
     )
-    assert estimate.rank_diverged is False
+    assert estimate.rank_diverged is True
+
+
+def test_cell_estimate_rejects_an_incomplete_draw_schedule() -> None:
+    incomplete = tuple(
+        record for record in _cell_predictions() if record.draw_seed != E1_DRAW_IDS[-1]
+    )
+
+    with pytest.raises(ValueError, match="complete fixed draw schedule"):
+        estimate_e1_cell(incomplete, "SOURCE", "TARGET", 10)
 
 
 def test_equivalence_uses_equal_weight_isotonic_curve_and_first_linear_crossing() -> None:
@@ -255,14 +288,20 @@ def test_confirmatory_null_reuses_one_source_shuffle_across_all_draws(
 
     monkeypatch.setattr(e1_module, "trace_paired_cell", fake_trace)
 
-    result = run_confirmatory_test(source, target, observed, seed=41, n_jobs=1)
+    serial = run_confirmatory_test(source, target, observed, seed=41, n_jobs=1)
 
-    assert result.n_permutations == 999
-    assert len(result.null_lifts) == 999
+    assert serial.n_permutations == 999
+    assert len(serial.null_lifts) == 999
     for start in range(0, len(calls), 20):
         block = calls[start : start + 20]
         assert tuple(draw for draw, _ in block) == E1_DRAW_IDS
         assert len({shuffled for _, shuffled in block}) == 1
+
+    calls.clear()
+    with parallel_config(backend="threading"):
+        parallel = run_confirmatory_test(source, target, observed, seed=41, n_jobs=2)
+    assert np.array_equal(serial.null_lifts, parallel.null_lifts)
+    assert serial.p_value == parallel.p_value
 
 
 def test_inference_writer_assigns_a_p_value_only_to_the_confirmatory_cell(

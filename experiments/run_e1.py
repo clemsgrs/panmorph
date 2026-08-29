@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import csv
 import sys
 from dataclasses import asdict, fields
@@ -17,6 +18,7 @@ from panmorph.e1 import (  # noqa: E402
     E1Inference,
     PredictionRecord,
     TraceResult,
+    count_source_cases,
     estimate_e1_matrix,
     run_confirmatory_test,
     run_e1_matrix,
@@ -29,6 +31,27 @@ ROOT = Path(__file__).resolve().parent.parent
 def _read_rows(path: Path) -> tuple[dict[str, str], ...]:
     with path.open(newline="") as handle:
         return tuple(csv.DictReader(handle))
+
+
+def read_prediction_records(path: Path) -> tuple[PredictionRecord, ...]:
+    """Load the complete stored issue-#6 OOF prediction artifact."""
+    records = []
+    for row in _read_rows(path):
+        records.append(
+            PredictionRecord(
+                draw_seed=None if row["draw_seed"] == "" else int(row["draw_seed"]),
+                k="all" if row["k"] == "all" else int(row["k"]),
+                fold=int(row["fold"]),
+                held_out_sites=tuple(ast.literal_eval(row["held_out_sites"])),
+                arm=row["arm"],
+                source=row["source"],
+                target=row["target"],
+                case_id=row["case_id"],
+                label=int(row["label"]),
+                score=float(row["score"]),
+            )
+        )
+    return tuple(records)
 
 
 def _write_records(
@@ -190,23 +213,39 @@ def main() -> None:
     parser.add_argument(
         "--phase1", type=Path, default=ROOT / "results" / "gate_results.csv"
     )
+    parser.add_argument(
+        "--predictions",
+        type=Path,
+        default=ROOT / "results" / "e1_predictions.csv",
+        help="stored issue-#6 prediction table to summarize",
+    )
+    parser.add_argument(
+        "--generate",
+        action="store_true",
+        help="explicitly regenerate the issue-#6 matrix before inference",
+    )
     args = parser.parse_args()
 
     cohorts = load_all()
-    result = run_e1_matrix(cohorts)
-    write_reportable_results(result, args.phase1, args.out)
-    source_case_counts = {
-        source: sum(cohorts[name].n for name in source.split("+"))
-        for source in {record.source for record in result.aucs if record.arm == "warm"}
-    }
-    inference = estimate_e1_matrix(result.predictions, source_case_counts)
+    if args.generate:
+        result = run_e1_matrix(cohorts)
+        write_reportable_results(result, args.phase1, args.out)
+        predictions = read_prediction_records(args.out / "e1_predictions.csv")
+    else:
+        predictions = read_prediction_records(args.predictions)
+        args.out.mkdir(parents=True, exist_ok=True)
+    source_case_counts = count_source_cases(
+        cohorts,
+        {record.source for record in predictions if record.arm == "warm"},
+    )
+    inference = estimate_e1_matrix(predictions, source_case_counts)
     confirmatory = run_confirmatory_test(
-        cohorts["COAD"], cohorts["STAD"], result.predictions
+        cohorts["COAD"], cohorts["STAD"], predictions
     )
     write_registered_inference(inference, confirmatory, args.out)
     print(
-        f"Saved {len(result.aucs)} AUCs, {len(result.predictions)} predictions, "
-        f"and {len(result.draws)} training rows to {args.out}"
+        f"Saved {len(inference.cells)} registered cell estimates and "
+        f"{len(inference.equivalences)} equivalence estimates to {args.out}"
     )
 
 

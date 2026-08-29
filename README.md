@@ -148,6 +148,7 @@ It becomes a real question only after more MSI-labeled organs join the matrix.
 python experiments/run_gate.py           # full gate: 1000 perms, 2000 bootstraps
 python experiments/run_gate.py --quick   # smoke test
 python experiments/run_site_probe.py     # site-decodability diagnostic
-python experiments/run_e1.py             # full registered E1 matrix (20 paired draws)
+python experiments/run_e1.py --generate  # generate the full E1 matrix, then infer
+python experiments/run_e1.py             # infer from stored issue-#6 predictions
 python -m pytest                         # deterministic synthetic test suite
 ```
