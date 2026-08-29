@@ -12,9 +12,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from panmorph.data import load_all  # noqa: E402
 from panmorph.e1 import (  # noqa: E402
+    ConfirmatoryResult,
     DrawRecord,
+    E1Inference,
     PredictionRecord,
     TraceResult,
+    estimate_e1_matrix,
+    run_confirmatory_test,
     run_e1_matrix,
     validate_phase1_anchors,
 )
@@ -96,6 +100,90 @@ def write_reportable_results(
     _write_results(out / "e1_results.csv", result)
 
 
+def write_registered_inference(
+    inference: E1Inference,
+    confirmatory: ConfirmatoryResult,
+    out: Path,
+) -> None:
+    """Write registered descriptive estimates and the sole permutation test."""
+    estimate_fields = [
+        "source", "target", "base", "k", "n_draws",
+        "warm_auc", "warm_ci_lower", "warm_ci_upper",
+        "cold_auc", "cold_ci_lower", "cold_ci_upper",
+        "lift", "lift_ci_lower", "lift_ci_upper",
+        "rank_warm_auc", "rank_cold_auc", "rank_lift", "rank_diverged",
+        "confirmatory", "permutation_p",
+    ]
+    with (out / "e1_estimates.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=estimate_fields)
+        writer.writeheader()
+        for cell in inference.cells:
+            writer.writerow(
+                {
+                    "source": cell.source,
+                    "target": cell.target,
+                    "base": cell.base,
+                    "k": cell.k,
+                    "n_draws": cell.n_draws,
+                    "warm_auc": cell.warm.point,
+                    "warm_ci_lower": cell.warm.lower,
+                    "warm_ci_upper": cell.warm.upper,
+                    "cold_auc": cell.cold.point,
+                    "cold_ci_lower": cell.cold.lower,
+                    "cold_ci_upper": cell.cold.upper,
+                    "lift": cell.lift.point,
+                    "lift_ci_lower": cell.lift.lower,
+                    "lift_ci_upper": cell.lift.upper,
+                    "rank_warm_auc": cell.rank_warm,
+                    "rank_cold_auc": cell.rank_cold,
+                    "rank_lift": cell.rank_lift,
+                    "rank_diverged": cell.rank_diverged,
+                    "confirmatory": cell.confirmatory,
+                    "permutation_p": confirmatory.p_value if cell.confirmatory else "",
+                }
+            )
+
+    equivalence_fields = [
+        "source", "target", "base", "local_positive_equivalence",
+        "local_ci_lower", "local_ci_upper", "local_point_censored",
+        "local_ci_lower_censored", "local_ci_upper_censored",
+        "average_source_case_equivalence", "average_ci_lower", "average_ci_upper",
+        "average_point_censored", "average_ci_lower_censored",
+        "average_ci_upper_censored",
+    ]
+    with (out / "e1_equivalence.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=equivalence_fields)
+        writer.writeheader()
+        for cell in inference.equivalences:
+            local = cell.local_positive
+            average = local.average_source_case
+            writer.writerow(
+                {
+                    "source": cell.source,
+                    "target": cell.target,
+                    "base": cell.base,
+                    "local_positive_equivalence": local.point.value,
+                    "local_ci_lower": local.interval.lower,
+                    "local_ci_upper": local.interval.upper,
+                    "local_point_censored": local.point.censored,
+                    "local_ci_lower_censored": local.interval.lower_censored,
+                    "local_ci_upper_censored": local.interval.upper_censored,
+                    "average_source_case_equivalence": average.point.value,
+                    "average_ci_lower": average.interval.lower,
+                    "average_ci_upper": average.interval.upper,
+                    "average_point_censored": average.point.censored,
+                    "average_ci_lower_censored": average.interval.lower_censored,
+                    "average_ci_upper_censored": average.interval.upper_censored,
+                }
+            )
+
+    with (out / "e1_permutation_null.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=("permutation", "null_mean_lift"))
+        writer.writeheader()
+        for permutation, null_lift in enumerate(confirmatory.null_lifts):
+            writer.writerow({"permutation": permutation, "null_mean_lift": null_lift})
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", type=Path, default=ROOT / "results")
@@ -104,8 +192,18 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    result = run_e1_matrix(load_all())
+    cohorts = load_all()
+    result = run_e1_matrix(cohorts)
     write_reportable_results(result, args.phase1, args.out)
+    source_case_counts = {
+        source: sum(cohorts[name].n for name in source.split("+"))
+        for source in {record.source for record in result.aucs if record.arm == "warm"}
+    }
+    inference = estimate_e1_matrix(result.predictions, source_case_counts)
+    confirmatory = run_confirmatory_test(
+        cohorts["COAD"], cohorts["STAD"], result.predictions
+    )
+    write_registered_inference(inference, confirmatory, args.out)
     print(
         f"Saved {len(result.aucs)} AUCs, {len(result.predictions)} predictions, "
         f"and {len(result.draws)} training rows to {args.out}"

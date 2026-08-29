@@ -7,8 +7,10 @@ from decimal import Decimal
 from typing import Iterable, Literal, Mapping
 
 import numpy as np
+from joblib import Parallel, delayed
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import GroupKFold
+from sklearn.isotonic import IsotonicRegression
 
 from .data import Cohort
 from .probe import fit_predict
@@ -18,6 +20,10 @@ Origin = Literal["source", "target"]
 Rung = int | Literal["all"]
 E1_RUNGS: tuple[Rung, ...] = (0, 3, 5, 10, 25, 40, "all")
 E1_DRAW_IDS: tuple[int, ...] = tuple(range(20))
+BOOTSTRAP_REPLICATES = 2_000
+PERMUTATION_COUNT = 999
+CONFIRMATORY_CELL = ("COAD", "STAD", "single", 10)
+CONFIRMATORY_ALPHA = 0.05
 
 
 @dataclass(frozen=True)
@@ -85,6 +91,96 @@ class TraceResult:
     aucs: tuple[AucRecord, ...]
 
 
+@dataclass(frozen=True)
+class IntervalEstimate:
+    """A point estimate and its two-sided 95% percentile interval."""
+
+    point: float
+    lower: float
+    upper: float
+
+
+@dataclass(frozen=True)
+class CellEstimate:
+    """Registered paired inference for one warm/cold E1 cell."""
+
+    source: str
+    target: str
+    base: Literal["single", "pooled"]
+    k: Rung
+    n_draws: int
+    warm: IntervalEstimate
+    cold: IntervalEstimate
+    lift: IntervalEstimate
+    rank_warm: float
+    rank_cold: float
+    rank_lift: float
+    rank_diverged: bool
+    bootstrap_warm: np.ndarray
+    bootstrap_cold: np.ndarray
+    bootstrap_lift: np.ndarray
+    confirmatory: bool
+    permutation_p: float | None
+
+
+@dataclass(frozen=True)
+class EquivalenceEstimate:
+    """Local-positive equivalence, retaining right censoring at ``all``."""
+
+    value: float | None
+    censored: bool
+    censor_at: float | None
+
+
+@dataclass(frozen=True)
+class CensoredInterval:
+    """A percentile interval whose endpoints may be right-censored."""
+
+    lower: float
+    upper: float
+    lower_censored: bool
+    upper_censored: bool
+
+
+@dataclass(frozen=True)
+class EquivalenceDistribution:
+    point: EquivalenceEstimate
+    interval: CensoredInterval
+    bootstrap: tuple[EquivalenceEstimate, ...]
+
+
+@dataclass(frozen=True)
+class EquivalenceSummary(EquivalenceDistribution):
+    """Local-positive and per-source-case average equivalence."""
+
+    average_source_case: EquivalenceDistribution
+
+
+@dataclass(frozen=True)
+class ConfirmatoryResult:
+    """The sole registered COAD-to-STAD superiority test."""
+
+    observed_lift: float
+    p_value: float
+    significant: bool
+    n_permutations: int
+    null_lifts: np.ndarray
+
+
+@dataclass(frozen=True)
+class EquivalenceCellSummary:
+    source: str
+    target: str
+    base: Literal["single", "pooled"]
+    local_positive: EquivalenceSummary
+
+
+@dataclass(frozen=True)
+class E1Inference:
+    cells: tuple[CellEstimate, ...]
+    equivalences: tuple[EquivalenceCellSummary, ...]
+
+
 def rank_auc_diverged(raw_auc: float, rank_auc: float) -> bool:
     """Return whether the pre-specified sensitivity gap is greater than 0.01."""
     gap = abs(Decimal(str(raw_auc)) - Decimal(str(rank_auc)))
@@ -103,6 +199,37 @@ def _percentile_ranks(scores: np.ndarray) -> np.ndarray:
         ranks[order[start:stop]] = ((start + 1) + stop) / 2 / len(scores)
         start = stop
     return ranks
+
+
+def _binary_auc(labels: np.ndarray, scores: np.ndarray) -> float:
+    """Compute binary AUC by its Mann-Whitney rank identity."""
+    positive = labels == 1
+    n_positive = int(np.sum(positive))
+    n_negative = len(labels) - n_positive
+    if n_positive == 0 or n_negative == 0:
+        raise ValueError("AUC requires both labels")
+    ranks = _percentile_ranks(scores) * len(scores)
+    u = float(np.sum(ranks[positive])) - n_positive * (n_positive + 1) / 2
+    return u / (n_positive * n_negative)
+
+
+def _bootstrap_auc(
+    labels: np.ndarray, scores: np.ndarray, schedule: np.ndarray
+) -> np.ndarray:
+    """Evaluate a stratified bootstrap schedule with bounded vectorized comparisons."""
+    scheduled_labels = labels[schedule[0]]
+    positive_columns = scheduled_labels == 1
+    negative_columns = ~positive_columns
+    aucs = np.empty(len(schedule), dtype=float)
+    for start in range(0, len(schedule), 100):
+        stop = min(start + 100, len(schedule))
+        sampled = scores[schedule[start:stop]]
+        positive = sampled[:, positive_columns, None]
+        negative = sampled[:, None, negative_columns]
+        aucs[start:stop] = np.mean(positive > negative, axis=(1, 2)) + 0.5 * np.mean(
+            positive == negative, axis=(1, 2)
+        )
+    return aucs
 
 
 def summarize_predictions(
@@ -150,6 +277,416 @@ def _keyed_rng(draw_seed: int, *key: str) -> np.random.Generator:
     material = "\x1f".join((str(draw_seed), *key)).encode()
     seed = int.from_bytes(hashlib.sha256(material).digest()[:8], "little")
     return np.random.default_rng(seed)
+
+
+def stratified_bootstrap_indices(
+    labels: np.ndarray,
+    *,
+    seed: int = 0,
+    key: tuple[str, ...] = (),
+    n_boot: int = BOOTSTRAP_REPLICATES,
+) -> np.ndarray:
+    """Return a deterministic label-stratified patient bootstrap schedule."""
+    labels = np.asarray(labels)
+    classes = np.unique(labels)
+    if len(classes) < 2:
+        raise ValueError("patient bootstraps require at least two labels")
+    rng = _keyed_rng(seed, "bootstrap", *key)
+    strata = tuple(np.flatnonzero(labels == label) for label in classes)
+    return np.asarray(
+        [
+            np.concatenate(
+                [rng.choice(indices, size=len(indices), replace=True) for indices in strata]
+            )
+            for _ in range(n_boot)
+        ],
+        dtype=int,
+    )
+
+
+def is_confirmatory_cell(source: str, target: str, k: Rung) -> bool:
+    """Return whether this is the sole registered confirmatory E1 cell."""
+    base = "pooled" if "+" in source else "single"
+    return (source, target, base, k) == CONFIRMATORY_CELL
+
+
+def source_label_permutations(
+    labels: np.ndarray,
+    source: str,
+    *,
+    seed: int = 0,
+    n_permutations: int = PERMUTATION_COUNT,
+) -> np.ndarray:
+    """Generate keyed source-label permutations without changing prevalence."""
+    labels = np.asarray(labels)
+    rng = _keyed_rng(seed, "permutation", source)
+    return np.asarray([rng.permutation(labels) for _ in range(n_permutations)])
+
+
+def empirical_superiority_p(observed: float, null: np.ndarray) -> float:
+    """One-sided empirical p-value with the registered plus-one correction."""
+    null = np.asarray(null)
+    return float((1 + np.sum(null >= observed)) / (1 + len(null)))
+
+
+def run_confirmatory_test(
+    source: Cohort,
+    target: Cohort,
+    observed_predictions: tuple[PredictionRecord, ...] | list[PredictionRecord],
+    *,
+    seed: int = 0,
+    n_jobs: int = -1,
+) -> ConfirmatoryResult:
+    """Run the one registered 999-permutation mean-lift superiority test."""
+    if not is_confirmatory_cell(source.name, target.name, 10):
+        raise ValueError("only single-source COAD -> STAD at k=10 is confirmatory")
+    observed_warm = summarize_predictions(
+        [
+            record
+            for record in observed_predictions
+            if (record.source, record.target, record.k, record.arm)
+            == ("COAD", "STAD", 10, "warm")
+        ]
+    )
+    observed_cold = summarize_predictions(
+        [
+            record
+            for record in observed_predictions
+            if (record.source, record.target, record.k, record.arm)
+            == ("target-only", "STAD", 10, "cold")
+        ]
+    )
+    warm_by_draw = {record.draw_seed: record.raw_auc for record in observed_warm}
+    cold_by_draw = {record.draw_seed: record.raw_auc for record in observed_cold}
+    if tuple(sorted(warm_by_draw)) != E1_DRAW_IDS or warm_by_draw.keys() != cold_by_draw.keys():
+        raise ValueError("confirmatory predictions require all twenty fixed paired draws")
+    observed_lift = float(
+        np.mean([warm_by_draw[draw] - cold_by_draw[draw] for draw in E1_DRAW_IDS])
+    )
+
+    permutations = source_label_permutations(source.y, source.name, seed=seed)
+
+    def null_lift(shuffled_labels: np.ndarray) -> float:
+        shuffled_source = replace(source, y=shuffled_labels)
+        warm_aucs = []
+        for draw in E1_DRAW_IDS:
+            result = trace_paired_cell(
+                shuffled_source, target, 10, draw, arms=("warm",)
+            )
+            warm_aucs.append(result.aucs[0].raw_auc)
+        return float(
+            np.mean(
+                [
+                    warm_auc - cold_by_draw[draw]
+                    for draw, warm_auc in zip(E1_DRAW_IDS, warm_aucs)
+                ]
+            )
+        )
+
+    null_lifts = np.asarray(
+        Parallel(n_jobs=n_jobs)(delayed(null_lift)(labels) for labels in permutations)
+    )
+    p_value = empirical_superiority_p(observed_lift, null_lifts)
+    return ConfirmatoryResult(
+        observed_lift=observed_lift,
+        p_value=p_value,
+        significant=p_value < CONFIRMATORY_ALPHA,
+        n_permutations=len(null_lifts),
+        null_lifts=null_lifts,
+    )
+
+
+def _ordered_draw_scores(
+    records: list[PredictionRecord],
+    case_ids: tuple[str, ...],
+) -> tuple[np.ndarray, np.ndarray]:
+    by_case = {record.case_id: record for record in records}
+    if len(by_case) != len(records) or set(by_case) != set(case_ids):
+        raise ValueError("each arm and draw must contain the same patients exactly once")
+    labels = np.asarray([by_case[case_id].label for case_id in case_ids], dtype=int)
+    scores = np.asarray([by_case[case_id].score for case_id in case_ids], dtype=float)
+    return labels, scores
+
+
+def _interval(point: float, bootstrap: np.ndarray) -> IntervalEstimate:
+    lower, upper = np.percentile(bootstrap, (2.5, 97.5))
+    return IntervalEstimate(point, float(lower), float(upper))
+
+
+def estimate_e1_cell(
+    predictions: tuple[PredictionRecord, ...] | list[PredictionRecord],
+    source: str,
+    target: str,
+    k: Rung,
+    *,
+    seed: int = 0,
+    n_boot: int = BOOTSTRAP_REPLICATES,
+) -> CellEstimate:
+    """Estimate mean arm AUCs and paired lift from stored OOF predictions."""
+    warm = [
+        record
+        for record in predictions
+        if (record.source, record.target, record.k, record.arm)
+        == (source, target, k, "warm")
+    ]
+    cold = [
+        record
+        for record in predictions
+        if (record.source, record.target, record.k, record.arm)
+        == ("target-only", target, k, "cold")
+    ]
+    if not warm or not cold:
+        raise ValueError(f"missing paired predictions for {source} -> {target} at k={k}")
+    warm_draws = tuple(sorted({record.draw_seed for record in warm}, key=str))
+    cold_draws = tuple(sorted({record.draw_seed for record in cold}, key=str))
+    if warm_draws != cold_draws:
+        raise ValueError("warm and cold arms must use identical fixed draw IDs")
+
+    case_ids = tuple(sorted({record.case_id for record in warm}))
+    warm_scores: list[np.ndarray] = []
+    cold_scores: list[np.ndarray] = []
+    labels: np.ndarray | None = None
+    for draw in warm_draws:
+        warm_labels, draw_warm = _ordered_draw_scores(
+            [record for record in warm if record.draw_seed == draw], case_ids
+        )
+        cold_labels, draw_cold = _ordered_draw_scores(
+            [record for record in cold if record.draw_seed == draw], case_ids
+        )
+        if not np.array_equal(warm_labels, cold_labels):
+            raise ValueError("paired warm and cold patients must have identical labels")
+        if labels is not None and not np.array_equal(labels, warm_labels):
+            raise ValueError("patient labels must be fixed across draws")
+        labels = warm_labels
+        warm_scores.append(draw_warm)
+        cold_scores.append(draw_cold)
+    assert labels is not None
+
+    point_warm = float(np.mean([_binary_auc(labels, scores) for scores in warm_scores]))
+    point_cold = float(np.mean([_binary_auc(labels, scores) for scores in cold_scores]))
+    schedule = stratified_bootstrap_indices(
+        labels, seed=seed, key=(target,), n_boot=n_boot
+    )
+    bootstrap_warm = np.mean(
+        [_bootstrap_auc(labels, scores, schedule) for scores in warm_scores], axis=0
+    )
+    bootstrap_cold = np.mean(
+        [_bootstrap_auc(labels, scores, schedule) for scores in cold_scores], axis=0
+    )
+    bootstrap_lift = bootstrap_warm - bootstrap_cold
+
+    warm_rank = float(np.mean([record.rank_auc for record in summarize_predictions(warm)]))
+    cold_rank = float(np.mean([record.rank_auc for record in summarize_predictions(cold)]))
+    rank_lift = warm_rank - cold_rank
+    point_lift = point_warm - point_cold
+    return CellEstimate(
+        source=source,
+        target=target,
+        base="pooled" if "+" in source else "single",
+        k=k,
+        n_draws=len(warm_draws),
+        warm=_interval(point_warm, bootstrap_warm),
+        cold=_interval(point_cold, bootstrap_cold),
+        lift=_interval(point_lift, bootstrap_lift),
+        rank_warm=warm_rank,
+        rank_cold=cold_rank,
+        rank_lift=rank_lift,
+        rank_diverged=rank_auc_diverged(point_lift, rank_lift),
+        bootstrap_warm=bootstrap_warm,
+        bootstrap_cold=bootstrap_cold,
+        bootstrap_lift=bootstrap_lift,
+        confirmatory=is_confirmatory_cell(source, target, k),
+        permutation_p=None,
+    )
+
+
+def local_positive_equivalence(
+    foreign_only_auc: float,
+    cold_curve: Mapping[Rung, float],
+    *,
+    all_coordinate: float,
+) -> EquivalenceEstimate:
+    """Find the first linear crossing of the equal-weight isotonic cold curve."""
+    if foreign_only_auc <= 0.5:
+        return EquivalenceEstimate(0.0, False, None)
+    if "all" not in cold_curve:
+        raise ValueError("the cold curve must include the all endpoint")
+    numeric = sorted((float(k), float(value)) for k, value in cold_curve.items() if k != "all")
+    if not numeric:
+        raise ValueError("the cold curve must include at least one numeric rung")
+    if all_coordinate <= numeric[-1][0]:
+        raise ValueError("the all coordinate must lie beyond every numeric rung")
+    x = np.asarray([point[0] for point in numeric] + [float(all_coordinate)])
+    y = np.asarray([point[1] for point in numeric] + [float(cold_curve["all"])])
+    fitted = IsotonicRegression(increasing=True).fit_transform(
+        x, y, sample_weight=np.ones(len(x))
+    )
+
+    for index, value in enumerate(fitted):
+        if value < foreign_only_auc:
+            continue
+        if index == 0:
+            crossing = x[0]
+        else:
+            lower_x, upper_x = x[index - 1], x[index]
+            lower_y, upper_y = fitted[index - 1], value
+            crossing = (
+                lower_x
+                if upper_y == lower_y
+                else lower_x
+                + (upper_x - lower_x)
+                * (foreign_only_auc - lower_y)
+                / (upper_y - lower_y)
+            )
+        return EquivalenceEstimate(float(crossing), False, None)
+    return EquivalenceEstimate(None, True, float(all_coordinate))
+
+
+def _censored_percentile(
+    values: tuple[EquivalenceEstimate, ...], quantile: float
+) -> EquivalenceEstimate:
+    ordered = sorted(
+        values,
+        key=lambda value: float("inf") if value.censored else float(value.value),
+    )
+    index = max(0, int(np.ceil(quantile * len(ordered))) - 1)
+    return ordered[index]
+
+
+def _equivalence_distribution(
+    point: EquivalenceEstimate,
+    bootstrap: tuple[EquivalenceEstimate, ...],
+) -> EquivalenceDistribution:
+    lower = _censored_percentile(bootstrap, 0.025)
+    upper = _censored_percentile(bootstrap, 0.975)
+    return EquivalenceDistribution(
+        point=point,
+        interval=CensoredInterval(
+            lower=float(lower.censor_at if lower.censored else lower.value),
+            upper=float(upper.censor_at if upper.censored else upper.value),
+            lower_censored=lower.censored,
+            upper_censored=upper.censored,
+        ),
+        bootstrap=bootstrap,
+    )
+
+
+def _scale_equivalence(
+    estimate: EquivalenceEstimate, denominator: int
+) -> EquivalenceEstimate:
+    if estimate.censored:
+        return EquivalenceEstimate(None, True, float(estimate.censor_at) / denominator)
+    return EquivalenceEstimate(float(estimate.value) / denominator, False, None)
+
+
+def summarize_equivalence_bootstrap(
+    *,
+    foreign_only_auc: float,
+    cold_curve: Mapping[Rung, float],
+    foreign_bootstrap: np.ndarray,
+    cold_bootstrap: Mapping[Rung, np.ndarray],
+    all_coordinate: float,
+    source_case_count: int,
+) -> EquivalenceSummary:
+    """Recompute equivalence per bootstrap and report its censored interval."""
+    foreign_bootstrap = np.asarray(foreign_bootstrap)
+    if len(foreign_bootstrap) != BOOTSTRAP_REPLICATES:
+        raise ValueError(f"equivalence requires exactly {BOOTSTRAP_REPLICATES} bootstraps")
+    if source_case_count <= 0:
+        raise ValueError("source_case_count must be positive")
+    if set(cold_curve) != set(cold_bootstrap):
+        raise ValueError("point and bootstrap cold curves must have identical rungs")
+    if any(len(np.asarray(values)) != BOOTSTRAP_REPLICATES for values in cold_bootstrap.values()):
+        raise ValueError(f"equivalence requires exactly {BOOTSTRAP_REPLICATES} bootstraps")
+
+    point = local_positive_equivalence(
+        foreign_only_auc, cold_curve, all_coordinate=all_coordinate
+    )
+    bootstrap = tuple(
+        local_positive_equivalence(
+            float(foreign_bootstrap[index]),
+            {k: float(values[index]) for k, values in cold_bootstrap.items()},
+            all_coordinate=all_coordinate,
+        )
+        for index in range(BOOTSTRAP_REPLICATES)
+    )
+    average_point = _scale_equivalence(point, source_case_count)
+    average_bootstrap = tuple(
+        _scale_equivalence(value, source_case_count) for value in bootstrap
+    )
+    average = _equivalence_distribution(average_point, average_bootstrap)
+    distribution = _equivalence_distribution(point, bootstrap)
+    return EquivalenceSummary(
+        point=distribution.point,
+        interval=distribution.interval,
+        bootstrap=distribution.bootstrap,
+        average_source_case=average,
+    )
+
+
+def _all_positive_coordinate(
+    predictions: tuple[PredictionRecord, ...] | list[PredictionRecord], target: str
+) -> float:
+    rows = [
+        record
+        for record in predictions
+        if (record.source, record.target, record.k, record.arm)
+        == ("target-only", target, "all", "cold")
+    ]
+    by_case = {record.case_id: record for record in rows}
+    if len(by_case) != len(rows) or not rows:
+        raise ValueError(f"{target} requires one complete cold all prediction cohort")
+    total_positive = sum(record.label == 1 for record in rows)
+    folds = {record.fold for record in rows}
+    return float(
+        np.mean(
+            [
+                total_positive
+                - sum(record.label == 1 and record.fold == fold for record in rows)
+                for fold in folds
+            ]
+        )
+    )
+
+
+def estimate_e1_matrix(
+    predictions: tuple[PredictionRecord, ...] | list[PredictionRecord],
+    source_case_counts: Mapping[str, int],
+    *,
+    seed: int = 0,
+) -> E1Inference:
+    """Turn the complete stored E1 predictions into registered estimates."""
+    keys = {
+        (record.source, record.target, record.k)
+        for record in predictions
+        if record.arm == "warm"
+    }
+    cells = tuple(
+        estimate_e1_cell(predictions, source, target, k, seed=seed)
+        for source, target, k in sorted(keys, key=lambda key: (key[1], key[0], str(key[2])))
+    )
+    by_key = {(cell.source, cell.target, cell.k): cell for cell in cells}
+    pairs = sorted({(cell.source, cell.target) for cell in cells})
+    equivalences = []
+    for source, target in pairs:
+        pair_cells = [cell for cell in cells if (cell.source, cell.target) == (source, target)]
+        by_rung = {cell.k: cell for cell in pair_cells}
+        if 0 not in by_rung or "all" not in by_rung:
+            raise ValueError(f"{source} -> {target} equivalence requires 0 and all endpoints")
+        if source not in source_case_counts:
+            raise ValueError(f"missing source case count for {source}")
+        summary = summarize_equivalence_bootstrap(
+            foreign_only_auc=by_rung[0].warm.point,
+            cold_curve={k: cell.cold.point for k, cell in by_rung.items()},
+            foreign_bootstrap=by_rung[0].bootstrap_warm,
+            cold_bootstrap={k: cell.bootstrap_cold for k, cell in by_rung.items()},
+            all_coordinate=_all_positive_coordinate(predictions, target),
+            source_case_count=source_case_counts[source],
+        )
+        equivalences.append(
+            EquivalenceCellSummary(source, target, by_rung[0].base, summary)
+        )
+    return E1Inference(cells, tuple(equivalences))
 
 
 def _numeric_rung_pool(
