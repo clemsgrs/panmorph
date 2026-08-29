@@ -101,7 +101,7 @@ Pre-registered confirmatory cell: **COAD→STAD, pooled base, k=10**
 Statistic: paired lift Δ(k), averaged over fixed draw seeds; per-organ label-permutation null.
 Full specification: GitHub issue [panmorph#1](https://github.com/clemsgrs/panmorph/issues/1).
 It opens with a plain-language brief; the precise build spec follows below it.
-There is no test suite yet; the E1 build establishes the first one.
+The first E1 tracer and its synthetic pytest coverage now establish the experiment seam.
 
 **RQ2 (secondary): does a stronger model change the picture?**
 Try a newer foundation model (e.g. PRISM2) or a tile encoder with a trainable MIL
@@ -127,7 +127,7 @@ It becomes a real question only after more MSI-labeled organs join the matrix.
 ## Layout
 
 - `data/` — committed MSI label CSVs, one directory per cohort.
-- `src/panmorph/` — library (data loading, CV, probe, metrics, site probe).
+- `src/panmorph/` — library (data loading, CV, probe, metrics, E1 tracer, site probe).
 - `experiments/` — runnable entry points.
 - `results/` — committed gate output (`gate_results.csv`, logs).
 - `handover-deck.html` — the project walk-through deck.
@@ -139,4 +139,5 @@ It becomes a real question only after more MSI-labeled organs join the matrix.
 python experiments/run_gate.py           # full gate: 1000 perms, 2000 bootstraps
 python experiments/run_gate.py --quick   # smoke test
 python experiments/run_site_probe.py     # site-decodability diagnostic
+python -m pytest                         # deterministic synthetic test suite
 ```
