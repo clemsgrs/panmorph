@@ -102,6 +102,10 @@ Statistic: paired lift Δ(k), averaged over fixed draw seeds; per-organ label-pe
 Full specification: GitHub issue [panmorph#1](https://github.com/clemsgrs/panmorph/issues/1).
 It opens with a plain-language brief; the precise build spec follows below it.
 The first E1 tracer and its synthetic pytest coverage now establish the experiment seam.
+The registered matrix runner expands that seam over every single-source and pooled
+all-non-target base for COAD, STAD, and UCEC. It writes separate audit, prediction,
+and pooled-AUC tables only after its deterministic endpoints reproduce the committed
+Phase-1 results within `1e-6`.
 
 **RQ2 (secondary): does a stronger model change the picture?**
 Try a newer foundation model (e.g. PRISM2) or a tile encoder with a trainable MIL
@@ -139,5 +143,6 @@ It becomes a real question only after more MSI-labeled organs join the matrix.
 python experiments/run_gate.py           # full gate: 1000 perms, 2000 bootstraps
 python experiments/run_gate.py --quick   # smoke test
 python experiments/run_site_probe.py     # site-decodability diagnostic
+python experiments/run_e1.py             # full registered E1 matrix (20 paired draws)
 python -m pytest                         # deterministic synthetic test suite
 ```
