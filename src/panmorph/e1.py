@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
-from typing import Literal
+from typing import Iterable, Literal, Mapping
 
 import numpy as np
 from sklearn.metrics import roc_auc_score
@@ -15,6 +15,9 @@ from .probe import fit_predict
 
 Arm = Literal["warm", "cold"]
 Origin = Literal["source", "target"]
+Rung = int | Literal["all"]
+E1_RUNGS: tuple[Rung, ...] = (0, 3, 5, 10, 25, 40, "all")
+E1_DRAW_IDS: tuple[int, ...] = tuple(range(20))
 
 
 @dataclass(frozen=True)
@@ -30,8 +33,8 @@ class SampledCase:
 class DrawRecord:
     """One auditable row used to fit an arm for one held-out fold."""
 
-    draw_seed: int
-    k: int
+    draw_seed: int | None
+    k: Rung
     fold: int
     held_out_sites: tuple[str, ...]
     arm: Arm
@@ -48,8 +51,8 @@ class DrawRecord:
 class PredictionRecord:
     """One out-of-fold patient prediction."""
 
-    draw_seed: int
-    k: int
+    draw_seed: int | None
+    k: Rung
     fold: int
     held_out_sites: tuple[str, ...]
     arm: Arm
@@ -64,8 +67,8 @@ class PredictionRecord:
 class AucRecord:
     """Pooled out-of-fold AUC for one paired arm."""
 
-    draw_seed: int
-    k: int
+    draw_seed: int | None
+    k: Rung
     arm: Arm
     source: str
     target: str
@@ -152,14 +155,27 @@ def _keyed_rng(draw_seed: int, *key: str) -> np.random.Generator:
 def sample_rung(
     cohort: Cohort,
     held_out_sites: tuple[str, ...],
-    k: int,
-    draw_seed: int,
+    k: Rung,
+    draw_seed: int | None,
 ) -> tuple[SampledCase, ...]:
     """Select ``k`` positives and prevalence-matched negatives outside test sites."""
+    eligible = ~np.isin(cohort.sites, held_out_sites)
+    if k == "all":
+        chosen = np.flatnonzero(eligible)
+        return tuple(
+            SampledCase(
+                case_id=str(cohort.case_ids[index]),
+                label=int(cohort.y[index]),
+                site=str(cohort.sites[index]),
+            )
+            for index in chosen
+        )
+
     if k < 0:
         raise ValueError("k must be non-negative")
+    if k == 0:
+        return ()
 
-    eligible = ~np.isin(cohort.sites, held_out_sites)
     positive = np.flatnonzero(eligible & (cohort.y == 1))
     negative = np.flatnonzero(eligible & (cohort.y == 0))
     n_negative = round(k * (1.0 - cohort.prevalence) / cohort.prevalence)
@@ -167,6 +183,8 @@ def sample_rung(
         raise ValueError("rung exceeds the eligible cases outside the held-out sites")
 
     fold_key = ",".join(sorted(str(site) for site in held_out_sites))
+    if draw_seed is None:
+        raise ValueError("numeric rungs require a draw seed")
     rng = _keyed_rng(draw_seed, cohort.name, fold_key, str(k))
     chosen = np.concatenate(
         (
@@ -184,11 +202,40 @@ def sample_rung(
     )
 
 
+def preflight_rungs(
+    target: Cohort,
+    rungs: tuple[Rung, ...] = E1_RUNGS,
+) -> None:
+    """Fail before execution if any numeric rung cannot be drawn in every fold."""
+    numeric_rungs = tuple(k for k in rungs if k != "all")
+    folds = GroupKFold(n_splits=5).split(target.X, target.y, target.sites)
+    for fold, (_, test_indices) in enumerate(folds):
+        held_out_sites = tuple(
+            sorted(str(site) for site in np.unique(target.sites[test_indices]))
+        )
+        eligible = ~np.isin(target.sites, held_out_sites)
+        n_positive = int(np.count_nonzero(eligible & (target.y == 1)))
+        n_negative = int(np.count_nonzero(eligible & (target.y == 0)))
+        for k in numeric_rungs:
+            if k < 0:
+                raise ValueError(f"{target.name} rung {k} must be non-negative")
+            required_negative = round(
+                k * (1.0 - target.prevalence) / target.prevalence
+            )
+            if k > n_positive or required_negative > n_negative:
+                raise ValueError(
+                    f"{target.name} rung {k} is infeasible in fold {fold}: "
+                    f"needs {k} positives and {required_negative} negatives, "
+                    f"has {n_positive} positives and {n_negative} negatives"
+                )
+
+
 def trace_paired_cell(
     source: Cohort,
     target: Cohort,
-    k: int,
-    draw_seed: int,
+    k: Rung,
+    draw_seed: int | None,
+    arms: tuple[Arm, ...] = ("warm", "cold"),
 ) -> TraceResult:
     """Run one paired warm/cold E1 cell over site-grouped target folds."""
     target_index = {str(case_id): index for index, case_id in enumerate(target.case_ids)}
@@ -199,9 +246,11 @@ def trace_paired_cell(
     for fold, (_, test_indices) in enumerate(folds):
         held_out_sites = tuple(sorted(str(site) for site in np.unique(target.sites[test_indices])))
         local_cases = sample_rung(target, held_out_sites, k, draw_seed)
-        local_indices = np.asarray([target_index[case.case_id] for case in local_cases])
+        local_indices = np.asarray(
+            [target_index[case.case_id] for case in local_cases], dtype=int
+        )
 
-        for arm in ("warm", "cold"):
+        for arm in arms:
             if arm == "warm":
                 training_X = np.concatenate((source.X, target.X[local_indices]))
                 training_y = np.concatenate((source.y, target.y[local_indices]))
@@ -248,7 +297,11 @@ def trace_paired_cell(
                     )
                 )
 
-            scores = fit_predict(training_X, training_y, target.X[test_indices])
+            scores = (
+                np.full(len(test_indices), 0.5)
+                if arm == "cold" and k == 0
+                else fit_predict(training_X, training_y, target.X[test_indices])
+            )
             predictions.extend(
                 PredictionRecord(
                     draw_seed=draw_seed,
@@ -267,3 +320,110 @@ def trace_paired_cell(
 
     aucs = summarize_predictions(predictions)
     return TraceResult(tuple(draws), tuple(predictions), aucs)
+
+
+def _pool_cohorts(cohorts: tuple[Cohort, ...]) -> Cohort:
+    return Cohort(
+        name="+".join(sorted(cohort.name for cohort in cohorts)),
+        X=np.concatenate([cohort.X for cohort in cohorts]),
+        y=np.concatenate([cohort.y for cohort in cohorts]),
+        sites=np.concatenate([cohort.sites for cohort in cohorts]),
+        case_ids=np.concatenate([cohort.case_ids for cohort in cohorts]),
+    )
+
+
+def _rename_source(result: TraceResult, source: str) -> TraceResult:
+    return TraceResult(
+        draws=tuple(replace(record, source=source) for record in result.draws),
+        predictions=tuple(
+            replace(record, source=source) for record in result.predictions
+        ),
+        aucs=tuple(replace(record, source=source) for record in result.aucs),
+    )
+
+
+def run_e1_matrix(
+    cohorts: dict[str, Cohort],
+    rungs: tuple[Rung, ...] = E1_RUNGS,
+    draw_ids: tuple[int, ...] = E1_DRAW_IDS,
+) -> TraceResult:
+    """Run every single and pooled foreign base with deduplicated cold arms."""
+    if len(cohorts) < 2:
+        raise ValueError("E1 requires at least two cohorts")
+    for target in cohorts.values():
+        preflight_rungs(target, rungs)
+
+    draws: list[DrawRecord] = []
+    predictions: list[PredictionRecord] = []
+    aucs: list[AucRecord] = []
+
+    def collect(result: TraceResult) -> None:
+        draws.extend(result.draws)
+        predictions.extend(result.predictions)
+        aucs.extend(result.aucs)
+
+    for target_name in sorted(cohorts):
+        target = cohorts[target_name]
+        foreign = tuple(
+            cohorts[name] for name in sorted(cohorts) if name != target_name
+        )
+        bases = (*foreign, _pool_cohorts(foreign))
+        for k in rungs:
+            seeds: tuple[int | None, ...] = (
+                (None,) if k in (0, "all") else draw_ids
+            )
+            for draw_seed in seeds:
+                cold = trace_paired_cell(
+                    foreign[0], target, k, draw_seed, arms=("cold",)
+                )
+                collect(_rename_source(cold, "target-only"))
+                for source in bases:
+                    collect(
+                        trace_paired_cell(
+                            source, target, k, draw_seed, arms=("warm",)
+                        )
+                    )
+    return TraceResult(tuple(draws), tuple(predictions), tuple(aucs))
+
+
+def _canonical_source(source: str) -> str:
+    source = source.removesuffix(" (combined)")
+    return "+".join(sorted(source.split("+")))
+
+
+def validate_phase1_anchors(
+    aucs: tuple[AucRecord, ...] | list[AucRecord],
+    phase1_rows: Iterable[Mapping[str, object]],
+    tolerance: Decimal = Decimal("0.000001"),
+) -> None:
+    """Require E1 deterministic endpoints to reproduce committed Phase-1 AUCs."""
+    actual = {
+        (record.arm, record.source, record.target): record.raw_auc
+        for record in aucs
+        if (record.arm == "warm" and record.k == 0)
+        or (record.arm == "cold" and record.k == "all")
+    }
+    expected: dict[tuple[Arm, str, str], float] = {}
+    for row in phase1_rows:
+        component = str(row["component"])
+        target = str(row["target"])
+        if component == "zeroshot":
+            key = ("warm", _canonical_source(str(row["source"])), target)
+        elif component == "ceiling":
+            key = ("cold", "target-only", target)
+        else:
+            continue
+        expected[key] = float(row["auc"])
+
+    for key in actual.keys() - expected.keys():
+        raise ValueError(f"missing committed Phase-1 counterpart for endpoint: {key}")
+    for key, expected_auc in expected.items():
+        if key not in actual:
+            raise ValueError(f"missing Phase-1 anchor endpoint: {key}")
+        gap = abs(Decimal(str(actual[key])) - Decimal(str(expected_auc)))
+        if gap > tolerance:
+            raise ValueError(
+                "Phase-1 anchor mismatch for "
+                f"{key[0]} {key[1]} -> {key[2]}: "
+                f"E1={actual[key]:.12g}, Phase-1={expected_auc:.12g}, gap={gap}"
+            )
