@@ -8,4 +8,4 @@
 - [x] Red/green: emit auditable draw, prediction, and AUC records with order-invariant keyed random streams.
 - [x] Run focused and full tests; inspect changes for a smaller/elegant implementation.
 - [x] Self-review against `main` using the code-review skill, fix actionable findings, and rerun tests.
-- [ ] Commit, push `agent/issue-5`, and open a PR containing `Closes #5`.
+- [x] Commit, push `agent/issue-5`, and open a PR containing `Closes #5`.
