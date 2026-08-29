@@ -1,12 +1,19 @@
-import numpy as np
+import csv
 from dataclasses import replace
+from pathlib import Path
 
+import numpy as np
+import pytest
+
+from experiments.run_e1 import write_reportable_results
 from panmorph.data import Cohort
 from panmorph.e1 import (
     AucRecord,
+    DrawRecord,
     E1_DRAW_IDS,
     E1_RUNGS,
     PredictionRecord,
+    TraceResult,
     preflight_rungs,
     rank_auc_diverged,
     run_e1_matrix,
@@ -109,6 +116,8 @@ def test_preflight_rejects_an_infeasible_numeric_rung_without_clipping() -> None
     ):
         preflight_rungs(target, (3, 10))
 
+
+def test_registered_sweep_uses_the_fixed_rungs_and_twenty_draw_ids() -> None:
     assert E1_RUNGS == (0, 3, 5, 10, 25, 40, "all")
     assert E1_DRAW_IDS == tuple(range(20))
 
@@ -201,26 +210,64 @@ def test_all_endpoint_uses_every_eligible_target_training_case() -> None:
             assert actual == expected
 
 
-def test_matrix_runs_all_bases_and_deduplicates_source_independent_cold_results() -> None:
+@pytest.fixture(scope="module")
+def matrix_fixture() -> tuple[TraceResult, dict[str, Cohort]]:
     _, target = synthetic_cohorts()
     cohorts = {
         "A": replace(target, name="A"),
-        "B": replace(target, name="B", case_ids=np.asarray([f"B{i:02d}" for i in range(50)])),
-        "C": replace(target, name="C", case_ids=np.asarray([f"C{i:02d}" for i in range(50)])),
+        "B": replace(
+            target,
+            name="B",
+            case_ids=np.asarray([f"B{i:02d}" for i in range(50)]),
+        ),
+        "C": replace(
+            target,
+            name="C",
+            case_ids=np.asarray([f"C{i:02d}" for i in range(50)]),
+        ),
     }
+    return run_e1_matrix(cohorts, rungs=(0, 1, "all"), draw_ids=(0, 1)), cohorts
 
-    result = run_e1_matrix(cohorts, rungs=(0, 1, "all"), draw_ids=(0, 1))
 
+def test_matrix_runs_every_single_and_pooled_foreign_base(
+    matrix_fixture: tuple[TraceResult, dict[str, Cohort]],
+) -> None:
+    result, _ = matrix_fixture
     warm_sources = {
         (record.source, record.target)
         for record in result.aucs
         if record.arm == "warm"
     }
     assert warm_sources == {
-        ("B", "A"), ("C", "A"), ("B+C", "A"),
-        ("A", "B"), ("C", "B"), ("A+C", "B"),
-        ("A", "C"), ("B", "C"), ("A+B", "C"),
+        ("B", "A"),
+        ("C", "A"),
+        ("B+C", "A"),
+        ("A", "B"),
+        ("C", "B"),
+        ("A+C", "B"),
+        ("A", "C"),
+        ("B", "C"),
+        ("A+B", "C"),
     }
+
+
+def test_pooled_base_audit_rows_preserve_each_source_cohort(
+    matrix_fixture: tuple[TraceResult, dict[str, Cohort]],
+) -> None:
+    result, _ = matrix_fixture
+    pooled_source_rows = [
+        row
+        for row in result.draws
+        if row.source == "B+C" and row.target == "A" and row.origin == "source"
+    ]
+
+    assert {row.cohort for row in pooled_source_rows} == {"B", "C"}
+
+
+def test_matrix_stores_each_source_independent_cold_result_once(
+    matrix_fixture: tuple[TraceResult, dict[str, Cohort]],
+) -> None:
+    result, _ = matrix_fixture
     cold_keys = [
         (record.target, record.k, record.draw_seed)
         for record in result.aucs
@@ -231,12 +278,22 @@ def test_matrix_runs_all_bases_and_deduplicates_source_independent_cold_results(
         record.source for record in result.aucs if record.arm == "cold"
     } == {"target-only"}
 
+
+def test_matrix_stores_endpoints_once_and_sampled_rungs_per_draw(
+    matrix_fixture: tuple[TraceResult, dict[str, Cohort]],
+) -> None:
+    result, _ = matrix_fixture
     endpoint_records = [record for record in result.aucs if record.k in (0, "all")]
     sampled_records = [record for record in result.aucs if record.k == 1]
     assert {record.draw_seed for record in endpoint_records} == {None}
     assert {record.draw_seed for record in sampled_records} == {0, 1}
     assert len(result.aucs) == 48
 
+
+def test_every_matrix_key_has_exactly_one_complete_pooled_oof_cohort(
+    matrix_fixture: tuple[TraceResult, dict[str, Cohort]],
+) -> None:
+    result, cohorts = matrix_fixture
     prediction_keys = {
         (record.source, record.target, record.arm, record.k, record.draw_seed)
         for record in result.predictions
@@ -252,24 +309,208 @@ def test_matrix_runs_all_bases_and_deduplicates_source_independent_cold_results(
         assert len({record.case_id for record in rows}) == cohorts[key[1]].n
 
 
-def test_phase1_anchors_are_required_with_one_e_minus_six_tolerance() -> None:
-    endpoint_aucs = (
+def _phase1_records() -> tuple[tuple[AucRecord, ...], tuple[dict[str, str], ...]]:
+    return (
+        (
         AucRecord(None, 0, "warm", "B+C", "A", 0.7, 0.7, 0.0, False),
         AucRecord(None, "all", "cold", "target-only", "A", 0.8, 0.8, 0.0, False),
-    )
-    phase1_rows = (
-        {"component": "zeroshot", "source": "C+B (combined)", "target": "A", "auc": "0.700001"},
-        {"component": "ceiling", "source": "A (within)", "target": "A", "auc": "0.799999"},
+        ),
+        (
+            {
+                "component": "zeroshot",
+                "source": "C+B (combined)",
+                "target": "A",
+                "auc": "0.700001",
+            },
+            {
+                "component": "ceiling",
+                "source": "A (within)",
+                "target": "A",
+                "auc": "0.799999",
+            },
+        ),
     )
 
+
+def test_phase1_anchor_tolerance_is_inclusive_at_one_e_minus_six() -> None:
+    endpoint_aucs, phase1_rows = _phase1_records()
     validate_phase1_anchors(endpoint_aucs, phase1_rows)
 
+
+def test_phase1_anchor_rejects_a_gap_above_one_e_minus_six() -> None:
+    endpoint_aucs, phase1_rows = _phase1_records()
     mismatched = (phase1_rows[0] | {"auc": "0.7000011"}, phase1_rows[1])
     with np.testing.assert_raises_regex(ValueError, "Phase-1 anchor mismatch"):
         validate_phase1_anchors(endpoint_aucs, mismatched)
 
+
+def test_phase1_anchor_requires_a_committed_counterpart_for_every_endpoint() -> None:
+    endpoint_aucs, phase1_rows = _phase1_records()
     with np.testing.assert_raises_regex(ValueError, "missing committed Phase-1 counterpart"):
         validate_phase1_anchors(endpoint_aucs, phase1_rows[:1])
+
+
+def _write_phase1_anchor(path: Path, source: str, target: str, auc: float) -> None:
+    path.write_text(
+        "component,source,target,auc\n"
+        f"zeroshot,{source},{target},{auc}\n"
+    )
+
+
+@pytest.fixture(scope="module")
+def reportable_result() -> TraceResult:
+    return TraceResult(
+        draws=(
+            DrawRecord(
+                draw_seed=None,
+                k=0,
+                fold=0,
+                held_out_sites=("E",),
+                arm="warm",
+                source="SOURCE",
+                target="TARGET",
+                origin="source",
+                cohort="SOURCE",
+                case_id="S00",
+                label=1,
+                site="X",
+            ),
+        ),
+        predictions=(
+            PredictionRecord(
+                draw_seed=None,
+                k=0,
+                fold=0,
+                held_out_sites=("E",),
+                arm="warm",
+                source="SOURCE",
+                target="TARGET",
+                case_id="T00",
+                label=1,
+                score=0.25,
+            ),
+        ),
+        aucs=(
+            AucRecord(
+                draw_seed=None,
+                k=0,
+                arm="warm",
+                source="SOURCE",
+                target="TARGET",
+                raw_auc=0.7,
+                rank_auc=0.6,
+                rank_gap=0.1,
+                rank_diverged=True,
+            ),
+        ),
+    )
+
+
+@pytest.fixture
+def report_output(
+    tmp_path: Path,
+    reportable_result: TraceResult,
+) -> Path:
+    phase1 = tmp_path / "phase1.csv"
+    _write_phase1_anchor(phase1, "SOURCE", "TARGET", 0.7)
+    out = tmp_path / "report"
+    write_reportable_results(reportable_result, phase1, out)
+    return out
+
+
+def test_reportable_writer_emits_all_three_tables(report_output: Path) -> None:
+    assert {path.name for path in report_output.iterdir()} == {
+        "e1_draws.csv",
+        "e1_predictions.csv",
+        "e1_results.csv",
+    }
+
+
+def test_reportable_writer_serializes_the_tidy_result_schema(report_output: Path) -> None:
+    with (report_output / "e1_results.csv").open(newline="") as handle:
+        result_rows = tuple(csv.DictReader(handle))
+    assert tuple(result_rows[0]) == (
+        "experiment",
+        "source",
+        "target",
+        "base",
+        "arm",
+        "k",
+        "draw_seed",
+        "auc",
+        "rank_auc",
+        "rank_gap",
+        "rank_diverged",
+    )
+    assert result_rows[0] == {
+        "experiment": "E1",
+        "source": "SOURCE",
+        "target": "TARGET",
+        "base": "single",
+        "arm": "warm",
+        "k": "0",
+        "draw_seed": "",
+        "auc": "0.7",
+        "rank_auc": "0.6",
+        "rank_gap": "0.1",
+        "rank_diverged": "True",
+    }
+
+
+def test_reportable_writer_serializes_auditable_training_rows(
+    report_output: Path,
+) -> None:
+    with (report_output / "e1_draws.csv").open(newline="") as handle:
+        draw_rows = tuple(csv.DictReader(handle))
+
+    assert draw_rows[0] == {
+        "draw_seed": "",
+        "k": "0",
+        "fold": "0",
+        "held_out_sites": "('E',)",
+        "arm": "warm",
+        "source": "SOURCE",
+        "target": "TARGET",
+        "origin": "source",
+        "cohort": "SOURCE",
+        "case_id": "S00",
+        "label": "1",
+        "site": "X",
+    }
+
+
+def test_reportable_writer_serializes_auditable_prediction_rows(
+    report_output: Path,
+) -> None:
+    with (report_output / "e1_predictions.csv").open(newline="") as handle:
+        prediction_rows = tuple(csv.DictReader(handle))
+
+    assert prediction_rows[0] == {
+        "draw_seed": "",
+        "k": "0",
+        "fold": "0",
+        "held_out_sites": "('E',)",
+        "arm": "warm",
+        "source": "SOURCE",
+        "target": "TARGET",
+        "case_id": "T00",
+        "label": "1",
+        "score": "0.25",
+    }
+
+
+def test_reportable_writer_creates_no_output_when_an_anchor_fails(
+    tmp_path: Path,
+    reportable_result: TraceResult,
+) -> None:
+    phase1 = tmp_path / "phase1.csv"
+    _write_phase1_anchor(phase1, "SOURCE", "TARGET", 0.0)
+    out = tmp_path / "report"
+
+    with np.testing.assert_raises_regex(ValueError, "Phase-1 anchor mismatch"):
+        write_reportable_results(reportable_result, phase1, out)
+
+    assert not out.exists()
 
 
 def test_auc_summary_pools_raw_scores_and_percentile_ranks_with_average_ties() -> None:

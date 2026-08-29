@@ -152,6 +152,18 @@ def _keyed_rng(draw_seed: int, *key: str) -> np.random.Generator:
     return np.random.default_rng(seed)
 
 
+def _numeric_rung_pool(
+    cohort: Cohort,
+    held_out_sites: tuple[str, ...],
+    k: int,
+) -> tuple[np.ndarray, np.ndarray, int]:
+    eligible = ~np.isin(cohort.sites, held_out_sites)
+    positive = np.flatnonzero(eligible & (cohort.y == 1))
+    negative = np.flatnonzero(eligible & (cohort.y == 0))
+    required_negative = round(k * (1.0 - cohort.prevalence) / cohort.prevalence)
+    return positive, negative, required_negative
+
+
 def sample_rung(
     cohort: Cohort,
     held_out_sites: tuple[str, ...],
@@ -176,9 +188,9 @@ def sample_rung(
     if k == 0:
         return ()
 
-    positive = np.flatnonzero(eligible & (cohort.y == 1))
-    negative = np.flatnonzero(eligible & (cohort.y == 0))
-    n_negative = round(k * (1.0 - cohort.prevalence) / cohort.prevalence)
+    positive, negative, n_negative = _numeric_rung_pool(
+        cohort, held_out_sites, k
+    )
     if k > len(positive) or n_negative > len(negative):
         raise ValueError("rung exceeds the eligible cases outside the held-out sites")
 
@@ -213,20 +225,17 @@ def preflight_rungs(
         held_out_sites = tuple(
             sorted(str(site) for site in np.unique(target.sites[test_indices]))
         )
-        eligible = ~np.isin(target.sites, held_out_sites)
-        n_positive = int(np.count_nonzero(eligible & (target.y == 1)))
-        n_negative = int(np.count_nonzero(eligible & (target.y == 0)))
         for k in numeric_rungs:
             if k < 0:
                 raise ValueError(f"{target.name} rung {k} must be non-negative")
-            required_negative = round(
-                k * (1.0 - target.prevalence) / target.prevalence
+            positive, negative, required_negative = _numeric_rung_pool(
+                target, held_out_sites, k
             )
-            if k > n_positive or required_negative > n_negative:
+            if k > len(positive) or required_negative > len(negative):
                 raise ValueError(
                     f"{target.name} rung {k} is infeasible in fold {fold}: "
                     f"needs {k} positives and {required_negative} negatives, "
-                    f"has {n_positive} positives and {n_negative} negatives"
+                    f"has {len(positive)} positives and {len(negative)} negatives"
                 )
 
 
@@ -342,6 +351,29 @@ def _rename_source(result: TraceResult, source: str) -> TraceResult:
     )
 
 
+def _restore_pooled_provenance(
+    result: TraceResult,
+    cohorts: tuple[Cohort, ...],
+) -> TraceResult:
+    origins = {
+        str(case_id): cohort.name
+        for cohort in cohorts
+        for case_id in cohort.case_ids
+    }
+    if len(origins) != sum(cohort.n for cohort in cohorts):
+        raise ValueError("pooled source cohorts contain duplicate case IDs")
+    return TraceResult(
+        draws=tuple(
+            replace(record, cohort=origins[record.case_id])
+            if record.origin == "source"
+            else record
+            for record in result.draws
+        ),
+        predictions=result.predictions,
+        aucs=result.aucs,
+    )
+
+
 def run_e1_matrix(
     cohorts: dict[str, Cohort],
     rungs: tuple[Rung, ...] = E1_RUNGS,
@@ -367,7 +399,10 @@ def run_e1_matrix(
         foreign = tuple(
             cohorts[name] for name in sorted(cohorts) if name != target_name
         )
-        bases = (*foreign, _pool_cohorts(foreign))
+        bases = (
+            *((cohort, (cohort,)) for cohort in foreign),
+            (_pool_cohorts(foreign), foreign),
+        )
         for k in rungs:
             seeds: tuple[int | None, ...] = (
                 (None,) if k in (0, "all") else draw_ids
@@ -377,12 +412,13 @@ def run_e1_matrix(
                     foreign[0], target, k, draw_seed, arms=("cold",)
                 )
                 collect(_rename_source(cold, "target-only"))
-                for source in bases:
-                    collect(
-                        trace_paired_cell(
-                            source, target, k, draw_seed, arms=("warm",)
-                        )
+                for source, members in bases:
+                    warm = trace_paired_cell(
+                        source, target, k, draw_seed, arms=("warm",)
                     )
+                    if len(members) > 1:
+                        warm = _restore_pooled_provenance(warm, members)
+                    collect(warm)
     return TraceResult(tuple(draws), tuple(predictions), tuple(aucs))
 
 
