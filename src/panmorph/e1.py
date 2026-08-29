@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from decimal import Decimal
+from typing import Literal
 
 import numpy as np
 from sklearn.metrics import roc_auc_score
@@ -10,6 +12,9 @@ from sklearn.model_selection import GroupKFold
 
 from .data import Cohort
 from .probe import fit_predict
+
+Arm = Literal["warm", "cold"]
+Origin = Literal["source", "target"]
 
 
 @dataclass(frozen=True)
@@ -29,10 +34,10 @@ class DrawRecord:
     k: int
     fold: int
     held_out_sites: tuple[str, ...]
-    arm: str
+    arm: Arm
     source: str
     target: str
-    origin: str
+    origin: Origin
     cohort: str
     case_id: str
     label: int
@@ -47,7 +52,7 @@ class PredictionRecord:
     k: int
     fold: int
     held_out_sites: tuple[str, ...]
-    arm: str
+    arm: Arm
     source: str
     target: str
     case_id: str
@@ -61,7 +66,7 @@ class AucRecord:
 
     draw_seed: int
     k: int
-    arm: str
+    arm: Arm
     source: str
     target: str
     raw_auc: float
@@ -79,7 +84,8 @@ class TraceResult:
 
 def rank_auc_diverged(raw_auc: float, rank_auc: float) -> bool:
     """Return whether the pre-specified sensitivity gap is greater than 0.01."""
-    return abs(raw_auc - rank_auc) > 0.01 + 1e-12
+    gap = abs(Decimal(str(raw_auc)) - Decimal(str(rank_auc)))
+    return gap > Decimal("0.01")
 
 
 def _percentile_ranks(scores: np.ndarray) -> np.ndarray:
@@ -183,14 +189,13 @@ def trace_paired_cell(
     target: Cohort,
     k: int,
     draw_seed: int,
-    n_splits: int = 5,
 ) -> TraceResult:
     """Run one paired warm/cold E1 cell over site-grouped target folds."""
     target_index = {str(case_id): index for index, case_id in enumerate(target.case_ids)}
     draws: list[DrawRecord] = []
     predictions: list[PredictionRecord] = []
 
-    folds = GroupKFold(n_splits=n_splits).split(target.X, target.y, target.sites)
+    folds = GroupKFold(n_splits=5).split(target.X, target.y, target.sites)
     for fold, (_, test_indices) in enumerate(folds):
         held_out_sites = tuple(sorted(str(site) for site in np.unique(target.sites[test_indices])))
         local_cases = sample_rung(target, held_out_sites, k, draw_seed)

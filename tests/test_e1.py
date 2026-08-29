@@ -44,6 +44,16 @@ def test_sample_rung_selects_prevalence_matched_cases_outside_held_out_sites() -
 
     selected = sample_rung(cohort, held_out_sites=("A",), k=2, draw_seed=17)
 
+    assert [(record.case_id, record.label, record.site) for record in selected] == [
+        ("T05", 1, "F"),
+        ("T01", 1, "B"),
+        ("T20", 0, "C"),
+        ("T08", 0, "C"),
+        ("T15", 0, "D"),
+        ("T21", 0, "D"),
+        ("T22", 0, "E"),
+        ("T14", 0, "C"),
+    ]
     assert sum(record.label == 1 for record in selected) == 2
     assert sum(record.label == 0 for record in selected) == 6
     assert len({record.case_id for record in selected}) == 8
@@ -52,6 +62,11 @@ def test_sample_rung_selects_prevalence_matched_cases_outside_held_out_sites() -
 
 def test_keyed_draws_do_not_depend_on_request_order() -> None:
     _, target = synthetic_cohorts()
+    expected = {
+        ("A",): ("T35", "T21", "T26", "T36", "T39"),
+        ("B",): ("T35", "T09", "T39", "T08", "T48"),
+        ("C",): ("T15", "T18", "T34", "T37", "T47"),
+    }
 
     forward = {
         held_out: tuple(case.case_id for case in sample_rung(target, held_out, 1, 41))
@@ -62,7 +77,8 @@ def test_keyed_draws_do_not_depend_on_request_order() -> None:
         for held_out in (("C",), ("B",), ("A",))
     }
 
-    assert reverse == forward
+    assert forward == expected
+    assert reverse == expected
 
 
 def test_trace_pairs_training_draws_and_covers_every_patient_in_five_site_folds() -> None:
@@ -147,4 +163,5 @@ def test_auc_summary_pools_raw_scores_and_percentile_ranks_with_average_ties() -
 
 def test_rank_sensitivity_flags_only_gaps_greater_than_point_zero_one() -> None:
     assert rank_auc_diverged(0.70, 0.69) is False
+    assert rank_auc_diverged(0.70, 0.6899999999995) is True
     assert rank_auc_diverged(0.70, 0.689999) is True
