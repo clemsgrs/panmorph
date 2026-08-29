@@ -346,6 +346,67 @@ def empirical_superiority_p(observed: float, null: np.ndarray) -> float:
     return float((1 + np.sum(null >= observed)) / (1 + len(null)))
 
 
+def confirmatory_observed(
+    predictions: tuple[PredictionRecord, ...] | list[PredictionRecord],
+    draw_ids: tuple[int, ...] = E1_DRAW_IDS,
+) -> tuple[float, dict[int, float]]:
+    """Return registered observed mean lift and cold AUCs keyed by draw."""
+    warm = summarize_predictions(
+        [
+            record for record in predictions
+            if (record.source, record.target, record.k, record.arm)
+            == ("COAD", "STAD", 10, "warm")
+        ]
+    )
+    cold = summarize_predictions(
+        [
+            record for record in predictions
+            if (record.source, record.target, record.k, record.arm)
+            == ("target-only", "STAD", 10, "cold")
+        ]
+    )
+    warm_by_draw = {int(record.draw_seed): record.raw_auc for record in warm}
+    cold_by_draw = {int(record.draw_seed): record.raw_auc for record in cold}
+    if tuple(sorted(warm_by_draw)) != draw_ids or warm_by_draw.keys() != cold_by_draw.keys():
+        raise ValueError("confirmatory predictions require the complete fixed paired draws")
+    observed = float(
+        np.mean([warm_by_draw[draw] - cold_by_draw[draw] for draw in draw_ids])
+    )
+    return observed, cold_by_draw
+
+
+def evaluate_confirmatory_null(
+    source: Cohort,
+    target: Cohort,
+    shuffled_labels: np.ndarray,
+    cold_by_draw: Mapping[int, float],
+    *,
+    draw_ids: tuple[int, ...] = E1_DRAW_IDS,
+    n_jobs: int = -1,
+) -> np.ndarray:
+    """Evaluate supplied coherent source-label shuffles at the registered cell."""
+    def null_lift(labels: np.ndarray) -> float:
+        shuffled_source = replace(source, y=labels)
+        warm_aucs = [
+            trace_paired_cell(
+                shuffled_source, target, 10, draw, arms=("warm",)
+            ).aucs[0].raw_auc
+            for draw in draw_ids
+        ]
+        return float(
+            np.mean(
+                [
+                    warm_auc - cold_by_draw[draw]
+                    for draw, warm_auc in zip(draw_ids, warm_aucs)
+                ]
+            )
+        )
+
+    return np.asarray(
+        Parallel(n_jobs=n_jobs)(delayed(null_lift)(labels) for labels in shuffled_labels)
+    )
+
+
 def run_confirmatory_test(
     source: Cohort,
     target: Cohort,
@@ -359,53 +420,15 @@ def run_confirmatory_test(
     """Run the one registered 999-permutation mean-lift superiority test."""
     if not is_confirmatory_cell(source.name, target.name, 10):
         raise ValueError("only single-source COAD -> STAD at k=10 is confirmatory")
-    observed_warm = summarize_predictions(
-        [
-            record
-            for record in observed_predictions
-            if (record.source, record.target, record.k, record.arm)
-            == ("COAD", "STAD", 10, "warm")
-        ]
-    )
-    observed_cold = summarize_predictions(
-        [
-            record
-            for record in observed_predictions
-            if (record.source, record.target, record.k, record.arm)
-            == ("target-only", "STAD", 10, "cold")
-        ]
-    )
-    warm_by_draw = {record.draw_seed: record.raw_auc for record in observed_warm}
-    cold_by_draw = {record.draw_seed: record.raw_auc for record in observed_cold}
-    if tuple(sorted(warm_by_draw)) != draw_ids or warm_by_draw.keys() != cold_by_draw.keys():
-        raise ValueError("confirmatory predictions require the complete fixed paired draws")
-    observed_lift = float(
-        np.mean([warm_by_draw[draw] - cold_by_draw[draw] for draw in draw_ids])
-    )
+    observed_lift, cold_by_draw = confirmatory_observed(observed_predictions, draw_ids)
 
     permutations = source_label_permutations(
         source.y, source.name, seed=seed, n_permutations=n_permutations
     )
 
-    def null_lift(shuffled_labels: np.ndarray) -> float:
-        shuffled_source = replace(source, y=shuffled_labels)
-        warm_aucs = []
-        for draw in draw_ids:
-            result = trace_paired_cell(
-                shuffled_source, target, 10, draw, arms=("warm",)
-            )
-            warm_aucs.append(result.aucs[0].raw_auc)
-        return float(
-            np.mean(
-                [
-                    warm_auc - cold_by_draw[draw]
-                    for draw, warm_auc in zip(E1_DRAW_IDS, warm_aucs)
-                ]
-            )
-        )
-
-    null_lifts = np.asarray(
-        Parallel(n_jobs=n_jobs)(delayed(null_lift)(labels) for labels in permutations)
+    null_lifts = evaluate_confirmatory_null(
+        source, target, permutations, cold_by_draw,
+        draw_ids=draw_ids, n_jobs=n_jobs,
     )
     p_value = empirical_superiority_p(observed_lift, null_lifts)
     return ConfirmatoryResult(

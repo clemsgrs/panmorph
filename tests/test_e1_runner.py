@@ -7,7 +7,11 @@ import pytest
 import panmorph.e1_runner as runner_module
 
 from panmorph.data import Cohort
-from panmorph.e1_runner import run_e1_bundle, validate_e1_bundle
+from panmorph.e1_runner import (
+    rebuild_e1_reports,
+    run_e1_bundle,
+    validate_e1_bundle,
+)
 
 
 def _quick_cohorts() -> dict[str, Cohort]:
@@ -44,6 +48,10 @@ def test_quick_runner_emits_complete_non_reportable_bundle(tmp_path: Path) -> No
     assert manifest["configuration"]["bootstrap_replicates"] == 50
     assert manifest["configuration"]["permutations"] == 9
     assert manifest["resources"]["workers"] == 1
+    assert manifest["features"]["hashes"] == {
+        "COAD": "lxbzb8rd",
+        "STAD": "oowdp902",
+    }
 
     expected = {
         "e1_draws.csv",
@@ -71,6 +79,26 @@ def test_bundle_validation_rejects_a_schema_failure(tmp_path: Path) -> None:
         validate_e1_bundle(out)
 
 
+def test_reports_can_be_rebuilt_and_numeric_corruption_is_rejected(tmp_path: Path) -> None:
+    out = tmp_path / "bundle"
+    run_e1_bundle(out, profile="quick", cohorts=_quick_cohorts(), workers=1)
+    summaries = out / "e1_summaries.csv"
+    with summaries.open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+        fieldnames = tuple(rows[0])
+    rows[0]["lift"] = "999"
+    with summaries.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    with pytest.raises(ValueError, match="not reproducible from bundle inputs"):
+        validate_e1_bundle(out)
+
+    rebuild_e1_reports(out)
+    validate_e1_bundle(out)
+
+
 def test_compatible_resume_uses_complete_cell_and_permutation_checkpoints(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -86,6 +114,36 @@ def test_compatible_resume_uses_complete_cell_and_permutation_checkpoints(
     run_e1_bundle(out, profile="quick", cohorts=cohorts, workers=1)
 
     assert (out / "e1_predictions.csv").read_bytes() == expected
+
+
+def test_resume_recomputes_a_semantically_corrupt_cell_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = tmp_path / "bundle"
+    cohorts = _quick_cohorts()
+    run_e1_bundle(out, profile="quick", cohorts=cohorts, workers=1)
+    checkpoint = next((out / "checkpoints" / "cells").glob("*/predictions.csv"))
+    with checkpoint.open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+        fieldnames = tuple(rows[0])
+    rows[0]["score"] = "nan"
+    with checkpoint.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    original = runner_module.trace_paired_cell
+    calls = 0
+
+    def recording_execution(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(runner_module, "trace_paired_cell", recording_execution)
+    run_e1_bundle(out, profile="quick", cohorts=cohorts, workers=1)
+
+    assert calls == 1
+    validate_e1_bundle(out)
 
 
 def test_resume_refuses_changed_data_identity(tmp_path: Path) -> None:

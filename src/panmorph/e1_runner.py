@@ -5,8 +5,8 @@ import ast
 import csv
 import hashlib
 import json
-import os
 import subprocess
+import tempfile
 import time
 from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
@@ -30,9 +30,11 @@ from .e1 import (
     TraceResult,
     _pool_cohorts,
     _restore_pooled_provenance,
-    count_source_cases,
+    confirmatory_observed,
     empirical_superiority_p,
+    evaluate_confirmatory_null,
     estimate_e1_matrix,
+    preflight_rungs,
     source_label_permutations,
     summarize_predictions,
     trace_paired_cell,
@@ -130,7 +132,7 @@ def _cohort_identity(cohort: Cohort) -> dict[str, object]:
 
 def _manifest(profile: E1Profile, cohorts: Mapping[str, Cohort], workers: int) -> dict:
     feature_hashes = {
-        name: MSI_COHORTS[name][2].parent.parent.name
+        name: MSI_COHORTS[name][2].parent.name
         for name in profile.cohorts if name in MSI_COHORTS
     }
     return {
@@ -236,7 +238,15 @@ def _checkpoint_name(source: str, target: str, k: Rung, draw: int | None, arm: s
     return hashlib.sha256(material.encode()).hexdigest()[:16]
 
 
-def _load_cell(path: Path, target_n: int) -> TraceResult | None:
+def _load_cell(
+    path: Path,
+    *,
+    source: str,
+    target: Cohort,
+    k: Rung,
+    draw_seed: int | None,
+    arm: str,
+) -> TraceResult | None:
     if not path.is_dir():
         return None
     try:
@@ -248,7 +258,29 @@ def _load_cell(path: Path, target_n: int) -> TraceResult | None:
         aucs = tuple(_auc_record(row) for row in _read_csv(path / "aucs.csv", tuple(f.name for f in fields(AucRecord))))
     except (ValueError, KeyError, TypeError, SyntaxError):
         return None
-    if len(predictions) != target_n or len(aucs) != 1:
+    expected_key = (draw_seed, k, arm, source, target.name)
+    if (
+        len(predictions) != target.n
+        or {row.case_id for row in predictions} != set(map(str, target.case_ids))
+        or any(
+            (row.draw_seed, row.k, row.arm, row.source, row.target) != expected_key
+            or not np.isfinite(row.score)
+            for row in predictions
+        )
+        or any(
+            (row.draw_seed, row.k, row.arm, row.source, row.target) != expected_key
+            for row in draws
+        )
+        or len(aucs) != 1
+        or (
+            aucs[0].draw_seed, aucs[0].k, aucs[0].arm,
+            aucs[0].source, aucs[0].target,
+        ) != expected_key
+        or not all(
+            np.isfinite(value)
+            for value in (aucs[0].raw_auc, aucs[0].rank_auc, aucs[0].rank_gap)
+        )
+    ):
         return None
     return TraceResult(draws, predictions, aucs)
 
@@ -308,7 +340,14 @@ def _run_cells(out: Path, profile: E1Profile, cohorts: Mapping[str, Cohort], wor
     for index, spec in enumerate(specs):
         source, target, _, k, draw, arm = spec
         path = checkpoint_root / _checkpoint_name(source.name, target.name, k, draw, arm)
-        cached = _load_cell(path, target.n)
+        cached = _load_cell(
+            path,
+            source="target-only" if arm == "cold" else source.name,
+            target=target,
+            k=k,
+            draw_seed=draw,
+            arm=arm,
+        )
         if cached is None:
             missing.append((index, spec, path))
         else:
@@ -326,34 +365,8 @@ def _run_cells(out: Path, profile: E1Profile, cohorts: Mapping[str, Cohort], wor
     )
 
 
-def _confirmatory_observed(predictions, draw_ids: tuple[int, ...]) -> tuple[float, dict[int, float]]:
-    warm = summarize_predictions([
-        row for row in predictions
-        if (row.source, row.target, row.k, row.arm) == ("COAD", "STAD", 10, "warm")
-    ])
-    cold = summarize_predictions([
-        row for row in predictions
-        if (row.source, row.target, row.k, row.arm) == ("target-only", "STAD", 10, "cold")
-    ])
-    warm_by_draw = {int(row.draw_seed): row.raw_auc for row in warm}
-    cold_by_draw = {int(row.draw_seed): row.raw_auc for row in cold}
-    if tuple(sorted(warm_by_draw)) != draw_ids or warm_by_draw.keys() != cold_by_draw.keys():
-        raise ValueError("confirmatory predictions require the configured paired draws")
-    observed = float(np.mean([warm_by_draw[draw] - cold_by_draw[draw] for draw in draw_ids]))
-    return observed, cold_by_draw
-
-
-def _one_null(labels, source, target, draw_ids, cold_by_draw) -> float:
-    shuffled = replace(source, y=labels)
-    warm = [
-        trace_paired_cell(shuffled, target, 10, draw, arms=("warm",)).aucs[0].raw_auc
-        for draw in draw_ids
-    ]
-    return float(np.mean([auc - cold_by_draw[draw] for draw, auc in zip(draw_ids, warm)]))
-
-
 def _run_permutations(out, profile, cohorts, predictions, workers) -> ConfirmatoryResult:
-    observed, cold_by_draw = _confirmatory_observed(predictions, profile.draw_ids)
+    observed, cold_by_draw = confirmatory_observed(predictions, profile.draw_ids)
     schedules = source_label_permutations(
         cohorts["COAD"].y, "COAD", seed=0, n_permutations=profile.permutations
     )
@@ -373,10 +386,10 @@ def _run_permutations(out, profile, cohorts, predictions, workers) -> Confirmato
                 pass
         if cached is None:
             with parallel_config(backend="loky", inner_max_num_threads=1):
-                cached = np.asarray(Parallel(n_jobs=workers)(
-                    delayed(_one_null)(labels, cohorts["COAD"], cohorts["STAD"], profile.draw_ids, cold_by_draw)
-                    for labels in schedules[start:stop]
-                ))
+                cached = evaluate_confirmatory_null(
+                    cohorts["COAD"], cohorts["STAD"], schedules[start:stop],
+                    cold_by_draw, draw_ids=profile.draw_ids, n_jobs=workers,
+                )
             _write_csv(path, NULL_FIELDS, (
                 {"permutation": index, "null_mean_lift": value}
                 for index, value in zip(range(start, stop), cached)
@@ -390,9 +403,18 @@ def _base(record: AucRecord) -> str:
     return "target-only" if record.arm == "cold" else "pooled" if "+" in record.source else "single"
 
 
-def _write_bundle_tables(out: Path, result: TraceResult, inference: E1Inference, confirmatory: ConfirmatoryResult) -> None:
+def _write_raw_tables(out: Path, result: TraceResult) -> None:
     _write_csv(out / "e1_draws.csv", DRAW_FIELDS, (asdict(row) for row in result.draws))
     _write_csv(out / "e1_predictions.csv", PREDICTION_FIELDS, (asdict(row) for row in result.predictions))
+
+
+def _write_derived_tables(
+    out: Path,
+    predictions: tuple[PredictionRecord, ...],
+    inference: E1Inference,
+    confirmatory: ConfirmatoryResult,
+) -> None:
+    aucs = summarize_predictions(predictions)
     _write_csv(out / "e1_aucs.csv", AUC_FIELDS, (
         {
             "experiment": "E1", "source": row.source, "target": row.target,
@@ -401,7 +423,7 @@ def _write_bundle_tables(out: Path, result: TraceResult, inference: E1Inference,
             "rank_auc": row.rank_auc, "rank_gap": row.rank_gap,
             "rank_diverged": row.rank_diverged,
         }
-        for row in result.aucs
+        for row in aucs
     ))
     _write_csv(out / "e1_summaries.csv", SUMMARY_FIELDS, (
         {
@@ -440,6 +462,40 @@ def _write_bundle_tables(out: Path, result: TraceResult, inference: E1Inference,
         {"permutation": index, "null_mean_lift": value}
         for index, value in enumerate(confirmatory.null_lifts)
     ))
+
+
+def _derive_reports(out: Path) -> tuple[tuple[PredictionRecord, ...], E1Inference, ConfirmatoryResult]:
+    manifest = json.loads((out / "manifest.json").read_text())
+    predictions = tuple(
+        _prediction_record(row)
+        for row in _read_csv(out / "e1_predictions.csv", PREDICTION_FIELDS)
+    )
+    draw_ids = tuple(int(value) for value in manifest["configuration"]["draw_ids"])
+    source_names = {row.source for row in predictions if row.arm == "warm"}
+    source_counts = {
+        source: sum(int(manifest["cohorts"][member]["cases"]) for member in source.split("+"))
+        for source in source_names
+    }
+    inference = estimate_e1_matrix(
+        predictions,
+        source_counts,
+        draw_ids=draw_ids,
+        n_bootstraps=int(manifest["configuration"]["bootstrap_replicates"]),
+    )
+    null_rows = _read_csv(out / "e1_confirmatory_null.csv", NULL_FIELDS)
+    null = np.asarray([float(row["null_mean_lift"]) for row in null_rows])
+    observed, _ = confirmatory_observed(predictions, draw_ids)
+    p_value = empirical_superiority_p(observed, null)
+    confirmatory = ConfirmatoryResult(
+        observed, p_value, p_value < 0.05, len(null), null
+    )
+    return predictions, inference, confirmatory
+
+
+def rebuild_e1_reports(out: Path) -> None:
+    """Rebuild all derived CSV reports from stored predictions and null values."""
+    predictions, inference, confirmatory = _derive_reports(out)
+    _write_derived_tables(out, predictions, inference, confirmatory)
 
 
 def validate_e1_bundle(out: Path) -> None:
@@ -488,6 +544,18 @@ def validate_e1_bundle(out: Path) -> None:
         raise ValueError("confirmatory null is incomplete or out of order")
     if not draws:
         raise ValueError("draw audit table is empty")
+    predictions_records, inference, confirmatory = _derive_reports(out)
+    with tempfile.TemporaryDirectory(prefix="panmorph-e1-validate-") as temporary:
+        expected = Path(temporary)
+        _write_derived_tables(
+            expected, predictions_records, inference, confirmatory
+        )
+        for name in (
+            "e1_aucs.csv", "e1_summaries.csv", "e1_equivalence.csv",
+            "e1_confirmatory_null.csv",
+        ):
+            if (out / name).read_bytes() != (expected / name).read_bytes():
+                raise ValueError(f"stored {name} is not reproducible from bundle inputs")
 
 
 def render_e1_figures(out: Path) -> None:
@@ -549,6 +617,8 @@ def run_e1_bundle(
     if missing:
         raise ValueError(f"missing configured cohorts: {sorted(missing)}")
     loaded = {name: loaded[name] for name in selected.cohorts}
+    for target in loaded.values():
+        preflight_rungs(target, selected.rungs)
     planned = _manifest(selected, loaded, workers)
     out.mkdir(parents=True, exist_ok=True)
     manifest_path = out / "manifest.json"
@@ -562,19 +632,16 @@ def run_e1_bundle(
     if selected.reportable:
         with (ROOT / "results/gate_results.csv").open(newline="") as handle:
             validate_phase1_anchors(result.aucs, tuple(csv.DictReader(handle)))
-    source_counts = count_source_cases(
-        loaded, {row.source for row in result.predictions if row.arm == "warm"}
-    )
-    inference = estimate_e1_matrix(
-        result.predictions, source_counts, draw_ids=selected.draw_ids,
-        n_bootstraps=selected.bootstrap_replicates,
-    )
+    _write_raw_tables(out, result)
     confirmatory = _run_permutations(out, selected, loaded, result.predictions, workers)
-    _write_bundle_tables(out, result, inference, confirmatory)
+    _write_csv(out / "e1_confirmatory_null.csv", NULL_FIELDS, (
+        {"permutation": index, "null_mean_lift": value}
+        for index, value in enumerate(confirmatory.null_lifts)
+    ))
+    rebuild_e1_reports(out)
+    render_e1_figures(out)
     completed = dict(planned)
     completed["status"] = "complete"
     completed["elapsed_seconds"] = time.monotonic() - started
     _write_json(manifest_path, completed)
-    validate_e1_bundle(out)
-    render_e1_figures(out)
     return out
