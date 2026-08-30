@@ -1,0 +1,125 @@
+{
+  "code": {
+    "commit": "e53a066a7841428ba685c2f07585b969873986da",
+    "sha256": "b008dc0bf2f8f827389313a347e26755a67e40600f197f62d012703971a6a7d8"
+  },
+  "cohorts": {
+    "COAD": {
+      "case_sha256": "f7fadb59a994258e3c9a1ae775d5a788bdd9df373307361c0870383d5c7bc6f3",
+      "cases": 391,
+      "positives": 74,
+      "sha256": "476714411e6beb318d8c3f7b0c50681941f0ff0968a21a938512c5f5af978c5d"
+    },
+    "STAD": {
+      "case_sha256": "9dc6c81391cd30cba1d62acf08f59d82b8508ddff96809ddfb48822c933727e9",
+      "cases": 371,
+      "positives": 63,
+      "sha256": "a373892a9a79f8b68b4d592a8b670f60c38c2ad6eedd33d6aee4f6bf8456c8fa"
+    },
+    "UCEC": {
+      "case_sha256": "fe205c4d87b2bc53e3f8412f26ebdabce394ac9b9ede25c8b26818a2503d37ed",
+      "cases": 487,
+      "positives": 155,
+      "sha256": "fa9bd51ae836c18671dbede5529ea26fa8b15ad0dd9d989fb89bf67c2d6b9526"
+    }
+  },
+  "configuration": {
+    "bootstrap_replicates": 2000,
+    "draw_ids": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19
+    ],
+    "pairs": "registered_full_matrix",
+    "permutation_chunk_size": 50,
+    "permutations": 999,
+    "rungs": [
+      0,
+      3,
+      5,
+      10,
+      25,
+      40,
+      "all"
+    ],
+    "seeds": {
+      "bootstrap": 0,
+      "draws": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19
+      ],
+      "permutation": 0
+    }
+  },
+  "elapsed_seconds": 1332.4814951659646,
+  "features": {
+    "extractor": "PRISM",
+    "hashes": {
+      "COAD": "lxbzb8rd",
+      "STAD": "oowdp902",
+      "UCEC": "kooqa1ym"
+    }
+  },
+  "model": {
+    "grid": {
+      "C": [
+        1.0
+      ],
+      "class_weight": [
+        "balanced"
+      ],
+      "max_iter": [
+        2000
+      ]
+    },
+    "type": "StandardScaler+LogisticRegression"
+  },
+  "profile": "full",
+  "reportable": true,
+  "resources": {
+    "threads_per_worker": 1,
+    "workers": 8
+  },
+  "schema_version": "panmorph.e1.bundle/v2",
+  "splitter": {
+    "folds": 5,
+    "groups": "tissue_source_site",
+    "type": "GroupKFold"
+  },
+  "status": "complete"
+}

@@ -11,6 +11,7 @@ from panmorph.data import Cohort
 from panmorph.e1_runner import (
     E1Profile,
     _run_cells,
+    migrate_e1_bundle_v1_to_v2,
     rebuild_e1_reports,
     run_e1_bundle,
     validate_e1_bundle,
@@ -42,7 +43,7 @@ def test_quick_runner_emits_complete_non_reportable_bundle(tmp_path: Path) -> No
     run_e1_bundle(out, profile="quick", cohorts=_quick_cohorts(), workers=1)
 
     manifest = json.loads((out / "manifest.json").read_text())
-    assert manifest["schema_version"] == "panmorph.e1.bundle/v1"
+    assert manifest["schema_version"] == "panmorph.e1.bundle/v2"
     assert manifest["profile"] == "quick"
     assert manifest["reportable"] is False
     assert manifest["status"] == "complete"
@@ -58,6 +59,9 @@ def test_quick_runner_emits_complete_non_reportable_bundle(tmp_path: Path) -> No
 
     expected = {
         "e1_draws.csv",
+        "e1_folds.csv",
+        "e1_cohort_cases.csv",
+        "e1_source_bases.csv",
         "e1_predictions.csv",
         "e1_aucs.csv",
         "e1_summaries.csv",
@@ -69,6 +73,28 @@ def test_quick_runner_emits_complete_non_reportable_bundle(tmp_path: Path) -> No
         "e1_lift.pdf",
     }
     assert expected <= {path.name for path in out.iterdir()}
+    with (out / "e1_draws.csv").open(newline="") as handle:
+        reader = csv.DictReader(handle)
+        assert tuple(reader.fieldnames or ()) == (
+            "target", "k", "draw_seed", "fold", "case_id",
+        )
+    with (out / "e1_folds.csv").open(newline="") as handle:
+        reader = csv.DictReader(handle)
+        assert tuple(reader.fieldnames or ()) == (
+            "target", "fold", "held_out_sites",
+        )
+    with (out / "e1_cohort_cases.csv").open(newline="") as handle:
+        reader = csv.DictReader(handle)
+        assert tuple(reader.fieldnames or ()) == (
+            "cohort", "case_id", "label", "site",
+        )
+        assert next(reader) == {
+            "cohort": "COAD", "case_id": "COAD-000", "label": "1", "site": "A",
+        }
+    with (out / "e1_source_bases.csv").open(newline="") as handle:
+        assert list(csv.DictReader(handle)) == [
+            {"source": "COAD", "target": "STAD", "cohort": "COAD"},
+        ]
     with (out / "e1_confirmatory_null.csv").open(newline="") as handle:
         assert len(tuple(csv.DictReader(handle))) == 9
 
@@ -80,6 +106,58 @@ def test_bundle_validation_rejects_a_schema_failure(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="invalid schema for e1_aucs.csv"):
         validate_e1_bundle(out)
+
+
+def test_v1_migration_normalizes_repeated_audit_membership(tmp_path: Path) -> None:
+    out = tmp_path / "bundle"
+    out.mkdir()
+    (out / "manifest.json").write_text(json.dumps({
+        "schema_version": "panmorph.e1.bundle/v1",
+        "status": "complete",
+        "cohorts": {
+            "COAD": {"cases": 1, "positives": 1},
+            "STAD": {"cases": 2, "positives": 1},
+        },
+    }))
+    _write_csv_rows(out / "e1_draws.csv", runner_module.DRAW_FIELDS, [
+        {"draw_seed": "0", "k": "10", "fold": "0", "held_out_sites": "('B',)",
+         "arm": "warm", "source": "COAD", "target": "STAD", "origin": "source",
+         "cohort": "COAD", "case_id": "c1", "label": "1", "site": "A"},
+        {"draw_seed": "0", "k": "10", "fold": "0", "held_out_sites": "('B',)",
+         "arm": "warm", "source": "COAD", "target": "STAD", "origin": "target",
+         "cohort": "STAD", "case_id": "t1", "label": "1", "site": "A"},
+        {"draw_seed": "0", "k": "10", "fold": "0", "held_out_sites": "('B',)",
+         "arm": "cold", "source": "target-only", "target": "STAD", "origin": "target",
+         "cohort": "STAD", "case_id": "t1", "label": "1", "site": "A"},
+        {"draw_seed": "0", "k": "10", "fold": "1", "held_out_sites": "('A',)",
+         "arm": "warm", "source": "COAD", "target": "STAD", "origin": "target",
+         "cohort": "STAD", "case_id": "t2", "label": "0", "site": "B"},
+    ])
+    _write_csv_rows(out / "e1_predictions.csv", runner_module.PREDICTION_FIELDS, [
+        {"draw_seed": "0", "k": "10", "fold": "0", "held_out_sites": "('B',)",
+         "arm": "warm", "source": "COAD", "target": "STAD", "case_id": "t2",
+         "label": "0", "score": "0.25"},
+    ])
+
+    migrate_e1_bundle_v1_to_v2(out)
+
+    assert _read_csv_rows(out / "e1_draws.csv")[1] == [
+        {"target": "STAD", "k": "10", "draw_seed": "0", "fold": "0", "case_id": "t1"},
+        {"target": "STAD", "k": "10", "draw_seed": "0", "fold": "1", "case_id": "t2"},
+    ]
+    assert _read_csv_rows(out / "e1_source_bases.csv")[1] == [
+        {"source": "COAD", "target": "STAD", "cohort": "COAD"},
+    ]
+    assert _read_csv_rows(out / "e1_folds.csv")[1] == [
+        {"target": "STAD", "fold": "0", "held_out_sites": "('B',)"},
+        {"target": "STAD", "fold": "1", "held_out_sites": "('A',)"},
+    ]
+    assert _read_csv_rows(out / "e1_cohort_cases.csv")[1] == [
+        {"cohort": "COAD", "case_id": "c1", "label": "1", "site": "A"},
+        {"cohort": "STAD", "case_id": "t1", "label": "1", "site": "A"},
+        {"cohort": "STAD", "case_id": "t2", "label": "0", "site": "B"},
+    ]
+    assert json.loads((out / "manifest.json").read_text())["schema_version"] == "panmorph.e1.bundle/v2"
 
 
 def test_reports_can_be_rebuilt_and_numeric_corruption_is_rejected(tmp_path: Path) -> None:
@@ -296,6 +374,45 @@ def test_bundle_validation_rejects_incomplete_draw_coverage(
     _write_csv_rows(path, fieldnames, rows)
 
     with pytest.raises(ValueError, match="draw audit row coverage is incomplete"):
+        validate_e1_bundle(out)
+
+
+def test_bundle_validation_rejects_changed_source_base_composition(
+    tmp_path: Path, completed_quick_bundle: Path
+) -> None:
+    out = _copy_bundle(completed_quick_bundle, tmp_path / "bundle")
+    path = out / "e1_source_bases.csv"
+    fieldnames, rows = _read_csv_rows(path)
+    rows[0]["cohort"] = "STAD"
+    _write_csv_rows(path, fieldnames, rows)
+
+    with pytest.raises(ValueError, match="source-base composition is invalid"):
+        validate_e1_bundle(out)
+
+
+def test_bundle_validation_rejects_changed_fold_membership(
+    tmp_path: Path, completed_quick_bundle: Path
+) -> None:
+    out = _copy_bundle(completed_quick_bundle, tmp_path / "bundle")
+    path = out / "e1_folds.csv"
+    fieldnames, rows = _read_csv_rows(path)
+    rows[0]["held_out_sites"] = "('not-a-site',)"
+    _write_csv_rows(path, fieldnames, rows)
+
+    with pytest.raises(ValueError, match="fold site partition is invalid"):
+        validate_e1_bundle(out)
+
+
+def test_bundle_validation_rejects_changed_loaded_case_membership(
+    tmp_path: Path, completed_quick_bundle: Path
+) -> None:
+    out = _copy_bundle(completed_quick_bundle, tmp_path / "bundle")
+    path = out / "e1_cohort_cases.csv"
+    fieldnames, rows = _read_csv_rows(path)
+    rows[0]["site"] = "not-a-site"
+    _write_csv_rows(path, fieldnames, rows)
+
+    with pytest.raises(ValueError, match="cohort-case coverage is incomplete"):
         validate_e1_bundle(out)
 
 

@@ -1,6 +1,6 @@
 # E1 full-profile result
 
-This is the reportable `panmorph.e1.bundle/v1` execution on the frozen PRISM
+This is the reportable `panmorph.e1.bundle/v2` execution on the frozen PRISM
 embeddings. Raw pooled out-of-fold AUC is the primary metric. Rank-normalized AUC
 is retained only as the registered sensitivity annotation.
 
@@ -59,14 +59,17 @@ or re-rank the raw-AUC results.
 
 The retained suite passed before reportable execution (`49 passed` at execution
 revision `6db5bf8`), and the expanded post-review suite passed afterward
-(`53 passed` at validation revision `e53a066`). The full run executed
+(`57 passed` after normalized-bundle validation). The full run executed
 1,224 unique AUC cells and 509,592 predictions, covering every registered target,
 single/pooled base, arm, rung, and draw. It used 2,000 paired label-stratified
-bootstraps and 999 coherent permutations. The final audit contains 3,043,144
-unique draw rows. All nine warm-zero and three cold-all Phase-1 anchors passed at
+bootstraps and 999 coherent permutations. The normalized audit stores 123,796
+unique local-selection rows, 1,249 exact cohort-case rows, 15 target-fold rows,
+and 12 source-base membership rows; their joins reconstruct the original
+3,043,144 warm/cold training-membership rows exactly. All nine warm-zero and
+three cold-all Phase-1 anchors passed at
 `1e-6`; the maximum observed gap was `1.11e-16`.
 
 Both the bundle validator and an explicit audit of schemas, uniqueness keys,
-joins, patient coverage, paired local draws, source-case coverage, held-out-site
+joins, patient coverage, paired local draws, source-base composition, held-out-site
 exclusion, ordered null rows, figures, and complete/reportable manifest status
 passed.

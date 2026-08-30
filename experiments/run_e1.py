@@ -24,7 +24,12 @@ from panmorph.e1 import (  # noqa: E402
     run_e1_matrix,
     validate_phase1_anchors,
 )
-from panmorph.e1_runner import DEFAULT_WORKERS, run_e1_bundle  # noqa: E402
+from panmorph.e1_runner import (  # noqa: E402
+    DEFAULT_WORKERS,
+    migrate_e1_bundle_v1_to_v2,
+    run_e1_bundle,
+    validate_e1_bundle,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -213,7 +218,16 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=ROOT / "results" / "e1")
     parser.add_argument("--profile", choices=("quick", "full"), default="full")
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
+    parser.add_argument(
+        "--migrate-v1", action="store_true",
+        help="normalize an existing complete v1 bundle in place without recomputation",
+    )
     args = parser.parse_args()
+    if args.migrate_v1:
+        migrate_e1_bundle_v1_to_v2(args.out)
+        validate_e1_bundle(args.out)
+        print(f"Migrated and validated E1 bundle v2 at {args.out}")
+        return
     run_e1_bundle(args.out, profile=args.profile, workers=args.workers)
     label = "REPORTABLE" if args.profile == "full" else "NON-REPORTABLE"
     print(f"Saved validated E1 {args.profile} bundle ({label}) to {args.out}")
