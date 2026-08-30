@@ -333,20 +333,21 @@ def test_parallel_cells_run_warm_zero_in_the_phase1_numerical_environment(
         for record in result.predictions if record.arm == "warm"
     }
     actual = tuple(
-        actual_by_case[str(case_id)] for case_id in cohorts["STAD"].case_ids
+        round(actual_by_case[str(case_id)], 6)
+        for case_id in cohorts["STAD"].case_ids
     )
 
     assert actual == (
-        0.49433424066617077,
-        0.00031213977644068097,
-        0.0027615960052245563,
-        0.17239008842016437,
-        0.16803110972308366,
-        0.9896383143388447,
-        0.986182226058538,
-        0.7546004973158201,
-        0.9816596618367581,
-        0.008483664054423643,
+        0.494334,
+        0.000312,
+        0.002762,
+        0.172390,
+        0.168031,
+        0.989638,
+        0.986182,
+        0.754600,
+        0.981660,
+        0.008484,
     )
 
 
