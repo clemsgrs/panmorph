@@ -57,7 +57,9 @@ or re-rank the raw-AUC results.
 
 ## Validation and audit
 
-The retained suite passed before execution (`49 passed`). The full run executed
+The retained suite passed before reportable execution (`49 passed` at execution
+revision `6db5bf8`), and the expanded post-review suite passed afterward
+(`53 passed` at validation revision `e53a066`). The full run executed
 1,224 unique AUC cells and 509,592 predictions, covering every registered target,
 single/pooled base, arm, rung, and draw. It used 2,000 paired label-stratified
 bootstraps and 999 coherent permutations. The final audit contains 3,043,144

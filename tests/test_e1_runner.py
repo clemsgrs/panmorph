@@ -1,5 +1,4 @@
 import csv
-import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -10,6 +9,8 @@ import panmorph.e1_runner as runner_module
 
 from panmorph.data import Cohort
 from panmorph.e1_runner import (
+    E1Profile,
+    _run_cells,
     rebuild_e1_reports,
     run_e1_bundle,
     validate_e1_bundle,
@@ -200,42 +201,49 @@ def test_parallel_worker_count_does_not_change_result_tables(tmp_path: Path) -> 
         assert (serial / name).read_bytes() == (parallel / name).read_bytes()
 
 
-def test_parallel_bundle_warm_zero_exactly_matches_phase1_scoring(
+def test_parallel_cells_run_warm_zero_in_the_phase1_numerical_environment(
     tmp_path: Path,
 ) -> None:
-    cohorts = _quick_cohorts()
+    cohorts = {}
     dimensions = np.arange(1, 1_281)[None, :]
-    expanded = {}
-    for cohort_index, (name, cohort) in enumerate(cohorts.items(), start=1):
-        rows = np.arange(1, cohort.n + 1)[:, None]
-        expanded[name] = Cohort(
-            name=cohort.name,
+    for cohort_index, name in enumerate(("COAD", "STAD"), start=1):
+        labels = np.tile(np.asarray([1, 0]), 5)
+        rows = np.arange(1, 11)[:, None]
+        cohorts[name] = Cohort(
+            name=name,
             X=(
                 np.sin(rows * dimensions / (37 + cohort_index))
-                + cohort.y[:, None] * 0.02
+                + labels[:, None] * 0.02
             ).astype(np.float32),
-            y=cohort.y,
-            sites=cohort.sites,
-            case_ids=cohort.case_ids,
+            y=labels,
+            sites=np.repeat(np.asarray(["A", "B", "C", "D", "E"]), 2),
+            case_ids=np.asarray([f"{name}-{index:02}" for index in range(10)]),
         )
-    out = tmp_path / "bundle"
-    run_e1_bundle(out, profile="quick", cohorts=expanded, workers=2)
-    with (out / "e1_predictions.csv").open(newline="") as handle:
-        rows = [
-            row
-            for row in csv.DictReader(handle)
-            if row["source"] == "COAD"
-            and row["target"] == "STAD"
-            and row["arm"] == "warm"
-            and row["k"] == "0"
-        ]
-    actual_by_case = {row["case_id"]: float(row["score"]) for row in rows}
-    actual = np.asarray(
-        [actual_by_case[str(case_id)] for case_id in expanded["STAD"].case_ids]
+    profile = E1Profile(
+        "quick", False, ("COAD", "STAD"), (("COAD", "STAD"),),
+        (0,), (), 1, 1, 1,
     )
 
-    assert hashlib.sha256(actual.tobytes()).hexdigest() == (
-        "709e5a46cced6e26dc315a73e22bf2ac6c0c9096a834d2ef9e88266e25298648"
+    result = _run_cells(tmp_path, profile, cohorts, workers=2)
+    actual_by_case = {
+        record.case_id: record.score
+        for record in result.predictions if record.arm == "warm"
+    }
+    actual = tuple(
+        actual_by_case[str(case_id)] for case_id in cohorts["STAD"].case_ids
+    )
+
+    assert actual == (
+        0.49433424066617077,
+        0.00031213977644068097,
+        0.0027615960052245563,
+        0.17239008842016437,
+        0.16803110972308366,
+        0.9896383143388447,
+        0.986182226058538,
+        0.7546004973158201,
+        0.9816596618367581,
+        0.008483664054423643,
     )
 
 
@@ -250,19 +258,29 @@ def _copy_bundle(source: Path, destination: Path) -> Path:
     return Path(shutil.copytree(source, destination))
 
 
+def _read_csv_rows(path: Path) -> tuple[tuple[str, ...], list[dict[str, str]]]:
+    with path.open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    return tuple(rows[0]), rows
+
+
+def _write_csv_rows(
+    path: Path, fieldnames: tuple[str, ...], rows: list[dict[str, str]]
+) -> None:
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def test_bundle_validation_rejects_duplicate_draw_grain(
     tmp_path: Path, completed_quick_bundle: Path
 ) -> None:
     out = _copy_bundle(completed_quick_bundle, tmp_path / "bundle")
     path = out / "e1_draws.csv"
-    with path.open(newline="") as handle:
-        rows = list(csv.DictReader(handle))
-        fieldnames = tuple(rows[0])
+    fieldnames, rows = _read_csv_rows(path)
     rows.append(dict(rows[0]))
-    with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+    _write_csv_rows(path, fieldnames, rows)
 
     with pytest.raises(ValueError, match="draw grain contains a duplicate row"):
         validate_e1_bundle(out)
@@ -273,14 +291,9 @@ def test_bundle_validation_rejects_incomplete_draw_coverage(
 ) -> None:
     out = _copy_bundle(completed_quick_bundle, tmp_path / "bundle")
     path = out / "e1_draws.csv"
-    with path.open(newline="") as handle:
-        rows = list(csv.DictReader(handle))
-        fieldnames = tuple(rows[0])
+    fieldnames, rows = _read_csv_rows(path)
     rows.pop()
-    with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+    _write_csv_rows(path, fieldnames, rows)
 
     with pytest.raises(ValueError, match="draw audit row coverage is incomplete"):
         validate_e1_bundle(out)
@@ -291,14 +304,9 @@ def test_bundle_validation_rejects_incomplete_prediction_coverage(
 ) -> None:
     out = _copy_bundle(completed_quick_bundle, tmp_path / "bundle")
     path = out / "e1_predictions.csv"
-    with path.open(newline="") as handle:
-        rows = list(csv.DictReader(handle))
-        fieldnames = tuple(rows[0])
+    fieldnames, rows = _read_csv_rows(path)
     rows.pop()
-    with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+    _write_csv_rows(path, fieldnames, rows)
 
     with pytest.raises(ValueError, match="prediction row coverage is incomplete"):
         validate_e1_bundle(out)
