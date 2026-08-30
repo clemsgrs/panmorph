@@ -1,127 +1,178 @@
-# Integrated E1 full-profile and exploratory swap result
+# What did foreign-organ training data buy us?
 
-This is the reportable `panmorph.e1.bundle/v2` execution on the frozen PRISM
-embeddings. Raw pooled out-of-fold AUC is the primary metric. Rank-normalized AUC
-is retained only as the registered sensitivity annotation.
+We tested whether MSI labels from one organ can reduce the number of local labels
+needed for another organ. The model and frozen PRISM features were kept fixed.
 
-## Observed result
+The organs are:
 
-The sole confirmatory cell was single-source **COAD → STAD at k=10**. Mean warm
-AUC was 0.8020 [0.7497, 0.8513], mean cold AUC was 0.7878 [0.7532, 0.8206], and
-the paired raw-AUC lift was **0.0142 [-0.0313, 0.0614]**. Against 999 coherent
-within-COAD label permutations, the registered plus-one empirical p-value was
-**p=0.001**. This is the bundle's only confirmatory claim. Its rank-sensitivity
-lift was 0.0208 and was not flagged as divergent.
+- **COAD** — colon cancer
+- **STAD** — stomach cancer
+- **UCEC** — endometrial cancer
 
-The corresponding COAD → STAD foreign-only model was equivalent to **8.00 local
-positive cases [4.31, 19.71]**, or **0.0205 local positives per average COAD
-source case [0.0110, 0.0504]**. Neither estimate nor interval was censored.
+## Bottom line
 
-All other cells below are descriptive, exploratory estimates, not additional
-confirmatory claims.
+1. **Colon data carried real signal for stomach cancer, but the measured performance
+   gain was small and uncertain.** With 10 local STAD-positive cases, adding COAD data
+   raised AUC from 0.788 to 0.802: a gain of 0.014. The uncertainty interval for that
+   gain included no improvement.
+2. **The complete COAD dataset was worth roughly 8 local STAD-positive cases.** The
+   plausible range was broad: about 4 to 20 cases.
+3. **UCEC was of little help for the two gastrointestinal cancers.** Its estimated value
+   was only 1.3 COAD-positive cases or 0.4 STAD-positive cases.
+4. **Adding a weak source could dilute a strong one.** Pooling UCEC with a useful GI
+   source reduced the estimated value in both GI targets.
+5. **At a fixed labeling budget, local STAD cases did most of the work.** Replacing a
+   small number of STAD cases with COAD cases sometimes gave a slightly higher point
+   estimate, but the differences were uncertain and did not support a general rule.
 
-| Source → target | Base | Local-positive equivalence [95% interval] | Per-source-case equivalence [95% interval] | Censoring |
-|---|---|---:|---:|---|
-| COAD → STAD | single | 8.00 [4.31, 19.71] | 0.0205 [0.0110, 0.0504] | none |
-| UCEC → STAD | single | 0.40 [0.00, 1.98] | 0.0008 [0.0000, 0.0041] | none |
-| COAD+UCEC → STAD | pooled | 6.22 [3.23, 12.76] | 0.0071 [0.0037, 0.0145] | none |
-| STAD → COAD | single | 31.93 [6.04, ≥59.20] | 0.0861 [0.0163, ≥0.1596] | upper interval right-censored at `all` |
-| UCEC → COAD | single | 1.32 [0.03, 2.66] | 0.0027 [0.0001, 0.0055] | none |
-| STAD+UCEC → COAD | pooled | 2.98 [1.76, 17.77] | 0.0035 [0.0021, 0.0207] | none |
-| COAD → UCEC | single | 6.40 [1.75, 17.66] | 0.0164 [0.0045, 0.0452] | none |
-| STAD → UCEC | single | 6.61 [1.87, 16.81] | 0.0178 [0.0050, 0.0453] | none |
-| COAD+STAD → UCEC | pooled | 4.17 [0.91, 11.55] | 0.0055 [0.0012, 0.0152] | none |
+The safe conclusion is: **cross-organ signal exists, but its practical value depends on
+the source, target, and amount of local data. There is no universal exchange rate for a
+foreign case.**
 
-Rank sensitivity diverged from raw pooled OOF AUC by more than 0.01 in 33 of 63
-summary cells. Flags occurred at every rung for STAD → COAD, STAD+UCEC → COAD,
-UCEC → COAD, and UCEC → STAD; at k=0 and `all` for COAD → STAD; and at k=0 for
-COAD+UCEC → STAD, COAD+STAD → UCEC, and STAD → UCEC. These flags do not replace
-or re-rank the raw-AUC results.
+## How to read the numbers
 
-## Findings versus registered expectations
+- **AUC** measures how well the model separates MSI-positive from MSI-negative patients.
+  `0.5` is chance; `1.0` is perfect separation.
+- Values in brackets are **95% uncertainty intervals**. Wider intervals mean less
+  certainty about the size of the effect.
+- **Equivalent local positives** asks: “How many local MSI-positive cases would a model
+  trained only on the target organ need to match the foreign-only model?”
+- `≥` means the upper end could not be measured before reaching all available local data.
 
-- The expected GI transfer value was present in the one registered test:
-  COAD → STAD at k=10 had positive observed lift and exceeded every permuted-null
-  statistic (plus-one p=0.001), although its paired bootstrap interval included
-  zero.
-- The expected weak UCEC-to-GI transfer was reflected descriptively by low
-  foreign-only equivalence: 1.32 positives for UCEC → COAD and 0.40 for
-  UCEC → STAD.
-- The expectation that pooling a weak source could dilute a strong GI source was
-  also visible descriptively: pooled equivalence was 2.98 for STAD+UCEC → COAD
-  versus 31.93 for STAD → COAD, and 6.22 for COAD+UCEC → STAD versus 8.00 for
-  COAD → STAD. These comparisons were not confirmatory tests.
-- Rank divergence was more widespread than a fully calibration-stable result
-  would predict, chiefly for COAD-target and UCEC-source cells. Accordingly, the
-  raw pooled OOF AUC remains primary and rank results remain annotations only.
+Two results that look contradictory answer different questions:
 
-## Exploratory COAD-to-STAD budget swap
+- The permutation result, **p=0.001**, says the COAD labels contain transferable signal;
+  none of the 999 shuffled-label runs matched the observed result.
+- The lift interval, **-0.031 to 0.061**, says the exact performance benefit at 10 local
+  positives is uncertain and could be negligible.
 
-The downstream swap held the total assay budget at 50, 100, or 200 cases while
-replacing COAD cases with STAD cases from 0% through 100% in ten-percentage-point
-steps. Each cell contains twenty nested draws. These are exploratory estimates;
-they are not confirmatory evidence and do not support a universal source-value
-claim.
+So there is strong evidence of transferable predictive signal, but not strong evidence
+that its immediate AUC gain is large.
 
-### Observed findings
+## Main result: colon to stomach
 
-Raw pooled STAD OOF AUC is primary. At budget 50, it was 0.5172
-[0.4629, 0.5742] at 0% STAD, reached 0.7740 [0.7392, 0.8080] at 90% STAD, and
-was 0.7617 [0.7260, 0.7984] at 100% STAD. At budget 100, the corresponding
-0%, 90%, and 100% STAD estimates were 0.5665 [0.5144, 0.6221], 0.8219
-[0.7845, 0.8591], and 0.8170 [0.7767, 0.8556]. At budget 200, they were 0.6430
-[0.5945, 0.6902], 0.8466 [0.8067, 0.8841], and 0.8513
-[0.8099, 0.8912]. Rank AUC diverged from raw AUC only at budget 50 with 0% and
-10% STAD, budget 100 with 0% STAD, and budget 200 with 0% STAD; rank remains an
-annotation and does not replace the raw-AUC results.
+This was the only pre-registered confirmatory comparison. Both models received the same
+local training sample, built around 10 STAD-positive cases plus negatives at the natural
+STAD prevalence; the warm model also received the complete COAD dataset.
 
-Conditional average COAD-case equivalence was 0.1371
-[-0.0471, 0.5412] at budget 50 with 50% STAD, 0.1036
-[-0.1185, 0.4972] at budget 100 with 50% STAD, and -0.0254
-[-0.3517, 0.3134] at budget 200 with 50% STAD. At budget 200, the point estimate
-remained negative with 60%, 70%, 80%, and 90% STAD: -0.0845
-[-0.4262, 0.2582], -0.2581 [-0.7214, 1.0611], -0.7295
-[-1.3444, 0.5559], and -1.5514 [-2.3773, ≥5.8400], respectively. The
-budget-200, 90%-STAD interval's upper endpoint was right-censored at the
-registered `all` coordinate. Target-only mixtures (100% STAD) have no source cases, so
-source-case equivalence is undefined at every budget. Negative values and the
-censoring indicator are retained in `swap_equivalence.csv`.
+| Model | Mean AUC | 95% interval |
+|---|---:|---:|
+| STAD cases only | 0.788 | 0.753 to 0.821 |
+| COAD plus the same STAD cases | 0.802 | 0.750 to 0.851 |
+| Difference | **+0.014** | **-0.031 to +0.061** |
 
-### Findings versus expectations
+The complete COAD dataset was estimated to be worth **8.00 local STAD-positive cases**
+(4.31 to 19.71). Dividing by the 391 COAD patients gives an average of 0.0205 local
+positive cases per COAD patient. That average is useful for accounting, not as a claim
+that every COAD patient has equal value.
 
-- The registered expectation that adding local STAD cases could improve STAD
-  discrimination was reflected conditionally at every registered budget: the
-  raw AUC with 90% STAD exceeded the raw AUC with 0% STAD at budgets 50, 100,
-  and 200. The estimates and intervals above show the magnitude and uncertainty.
-- The expectation that COAD cases could retain value under target scarcity was
-  not uniform across budgets or mixtures. At 90% STAD, conditional average
-  COAD-case equivalence was positive at budgets 50 and 100 but negative at
-  budget 200, where its upper interval endpoint was right-censored. This
-  contrast is descriptive and exploratory; the qualified estimates are above.
+## What the other organ pairs suggested
 
-## Validation and audit
+These comparisons are exploratory. They are useful patterns, not additional confirmed
+findings.
 
-The retained suite passed before reportable execution (`49 passed` at execution
-revision `6db5bf8`), and the expanded post-review suite passed afterward
-(`58 passed` after normalized-bundle validation). The full run executed
-1,224 unique AUC cells and 509,592 predictions, covering every registered target,
-single/pooled base, arm, rung, and draw. It used 2,000 paired label-stratified
-bootstraps and 999 coherent permutations. The normalized audit stores 123,796
-unique local-selection rows, 1,249 exact cohort-case rows, 15 target-fold rows,
-and 12 source-base membership rows; their joins reconstruct the original
-3,043,144 warm/cold training-membership rows exactly. All nine warm-zero and
-three cold-all Phase-1 anchors passed at
-`1e-6`; the maximum observed gap was `1.11e-16`.
+| Foreign training data | Target | Equivalent local positive cases | Plain-language reading |
+|---|---|---:|---|
+| COAD | STAD | 8.00 [4.31, 19.71] | Useful transfer |
+| UCEC | STAD | 0.40 [0.00, 1.98] | Little measurable value |
+| COAD + UCEC | STAD | 6.22 [3.23, 12.76] | Less than COAD alone |
+| STAD | COAD | 31.93 [6.04, ≥59.20] | Potentially strong, but upper bound unresolved |
+| UCEC | COAD | 1.32 [0.03, 2.66] | Little measurable value |
+| STAD + UCEC | COAD | 2.98 [1.76, 17.77] | Much less than STAD alone |
+| COAD | UCEC | 6.40 [1.75, 17.66] | Modest exploratory value |
+| STAD | UCEC | 6.61 [1.87, 16.81] | Modest exploratory value |
+| COAD + STAD | UCEC | 4.17 [0.91, 11.55] | Pooling did not improve the estimate |
 
-Both the bundle validator and an explicit audit of schemas, uniqueness keys,
-joins, patient coverage, paired local draws, source-base composition, held-out-site
-exclusion, ordered null rows, figures, and complete/reportable manifest status
-passed.
+The clearest descriptive pattern was that UCEC contributed little to COAD or STAD and
+reduced the estimated value when pooled with the stronger GI source.
 
-For the downstream swap, the retained suite passed before execution (`80
-passed`). The reportable run produced 385,000 draw rows, 244,860 prediction rows,
-660 draw-level AUC rows, 33 summary rows, 10 target-reference rows, 33
-equivalence rows, and four PNG/PDF figures. Strict validation passed the schemas,
-configured keys and joins, nested-prefix invariants, complete 371-patient STAD
-OOF coverage in every draw cell, prevalence-matched composition, reproducibility
-of derived results, figure signatures, and complete exploratory manifest status.
+### A robustness warning
+
+For 33 of the 63 E1 summary cells, AUC changed by more than 0.01 when scores were ranked
+within each hospital-held-out fold. This means some results depend on how scores from
+different folds are put on a common scale. The reported raw AUC remains the primary
+metric; the rank analysis is only a warning flag.
+
+## Fixed-budget experiment: should some STAD labels be replaced with COAD labels?
+
+The first experiment added foreign data on top of local data. This second, exploratory
+experiment asked a stricter question: with a fixed budget of 50, 100, or 200 labeled
+patients, should any of those labels come from COAD instead of STAD?
+
+The table shows three easy-to-interpret mixtures. Every estimate averages 20 repeated
+draws and evaluates the complete STAD cohort.
+
+| Total labeled patients | 100% COAD | 90% STAD + 10% COAD | 100% STAD |
+|---:|---:|---:|---:|
+| 50 | 0.517 [0.463, 0.574] | **0.774 [0.739, 0.808]** | 0.762 [0.726, 0.798] |
+| 100 | 0.566 [0.514, 0.622] | **0.822 [0.785, 0.859]** | 0.817 [0.777, 0.856] |
+| 200 | 0.643 [0.594, 0.690] | 0.847 [0.807, 0.884] | **0.851 [0.810, 0.891]** |
+
+What this says:
+
+- **COAD-only training was much worse than training with mostly or entirely STAD.**
+- With budgets of 50 and 100, the 90%-STAD mixture had a slightly higher point estimate
+  than 100% STAD. The intervals overlap heavily, so this is not evidence that replacing
+  STAD cases with COAD cases is reliably better.
+- With a budget of 200, 100% STAD had the highest of these three point estimates.
+- Score-ranking warnings appeared only in mixtures with no or very little STAD: 0% STAD
+  at every budget and 10% STAD at budget 50.
+
+### How much was one COAD case worth at a 50/50 mixture?
+
+This calculation expresses the average COAD case in units of local STAD-positive cases.
+
+| Total budget | Estimated value per COAD case | 95% interval |
+|---:|---:|---:|
+| 50 | +0.137 | -0.047 to +0.541 |
+| 100 | +0.104 | -0.118 to +0.497 |
+| 200 | -0.025 | -0.352 to +0.313 |
+
+All three intervals include zero. We therefore cannot conclude that an average COAD case
+has consistently positive value at a 50/50 mixture.
+
+At budget 200, the point estimate stayed negative from 50% through 90% STAD and became
+more negative as COAD became scarcer. Those intervals were wide and included zero; the
+90%-STAD upper bound also exceeded the measurable local-data range. This is an unstable,
+exploratory pattern—not evidence that COAD cases are universally harmful.
+
+At 100% STAD there are no COAD cases, so “value per COAD case” is undefined.
+
+## What we can and cannot claim
+
+### Supported by the registered test
+
+- COAD labels contain MSI signal that transfers to STAD when 10 local STAD-positive cases
+  are available (`p=0.001`).
+- The observed AUC gain was small, and its uncertainty interval included zero.
+
+### Exploratory only
+
+- UCEC appears to offer little value for COAD or STAD.
+- Pooling UCEC with a useful GI source may dilute that source.
+- A small COAD fraction may sometimes match an all-STAD budget, but this was not consistent
+  enough to recommend a universal sampling strategy.
+- The value of a COAD case changes with total budget and COAD/STAD mixture.
+
+## Validation and detailed artifacts
+
+The final test suite contains 80 deterministic tests. The reportable runs covered:
+
+- all 1,224 registered E1 cells, 2,000 bootstraps, and 999 label permutations;
+- all 660 fixed-budget swap cells, 2,000 bootstraps, and no confirmatory permutations;
+- every patient exactly once in each out-of-fold evaluation;
+- exact Phase-1 anchor reproduction, with a maximum difference of `1.11e-16`;
+- schema, key, join, nesting, prevalence, and artifact-integrity checks.
+
+The normalized audit tables can reconstruct every training set without storing millions
+of repeated rows. Exact values are available in:
+
+- `e1_summaries.csv` — E1 AUC and lift estimates
+- `e1_equivalence.csv` — local-positive equivalence estimates
+- `e1_confirmatory_null.csv` — the 999 shuffled-label results
+- `swap_summaries.csv` — fixed-budget AUC estimates
+- `swap_equivalence.csv` — budget- and mixture-specific COAD-case values
+- `manifest.json` — registered configuration and execution identity
+
+All E1 claims outside the single COAD-to-STAD comparison at 10 local positives, and all
+fixed-budget swap results, remain exploratory.
