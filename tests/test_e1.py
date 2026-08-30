@@ -264,6 +264,35 @@ def test_pooled_base_audit_rows_preserve_each_source_cohort(
     assert {row.cohort for row in pooled_source_rows} == {"B", "C"}
 
 
+def test_pooled_base_preserves_registered_source_row_order() -> None:
+    _, target = synthetic_cohorts()
+    cohorts = {
+        "A": replace(target, name="A"),
+        "C": replace(
+            target,
+            name="C",
+            case_ids=np.asarray([f"C{i:02d}" for i in range(50)]),
+        ),
+        "B": replace(
+            target,
+            name="B",
+            case_ids=np.asarray([f"B{i:02d}" for i in range(50)]),
+        ),
+    }
+
+    result = run_e1_matrix(cohorts, rungs=(0,), draw_ids=())
+    pooled_fold = [
+        row
+        for row in result.draws
+        if row.source == "B+C"
+        and row.target == "A"
+        and row.fold == 0
+        and row.origin == "source"
+    ]
+
+    assert [row.cohort for row in pooled_fold] == ["C"] * 50 + ["B"] * 50
+
+
 def test_matrix_stores_each_source_independent_cold_result_once(
     matrix_fixture: tuple[TraceResult, dict[str, Cohort]],
 ) -> None:

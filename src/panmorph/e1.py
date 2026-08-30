@@ -846,6 +846,11 @@ def trace_paired_cell(
     target_index = {str(case_id): index for index, case_id in enumerate(target.case_ids)}
     draws: list[DrawRecord] = []
     predictions: list[PredictionRecord] = []
+    warm_zero_scores = (
+        fit_predict(source.X, source.y, target.X)
+        if k == 0 and "warm" in arms
+        else None
+    )
 
     folds = GroupKFold(n_splits=5).split(target.X, target.y, target.sites)
     for fold, (_, test_indices) in enumerate(folds):
@@ -905,6 +910,8 @@ def trace_paired_cell(
             scores = (
                 np.full(len(test_indices), 0.5)
                 if arm == "cold" and k == 0
+                else warm_zero_scores[test_indices]
+                if arm == "warm" and k == 0
                 else fit_predict(training_X, training_y, target.X[test_indices])
             )
             predictions.extend(
@@ -935,6 +942,13 @@ def _pool_cohorts(cohorts: tuple[Cohort, ...]) -> Cohort:
         sites=np.concatenate([cohort.sites for cohort in cohorts]),
         case_ids=np.concatenate([cohort.case_ids for cohort in cohorts]),
     )
+
+
+def _foreign_cohorts(
+    cohorts: Mapping[str, Cohort], target_name: str
+) -> tuple[Cohort, ...]:
+    """Return foreign cohorts in their registered row order."""
+    return tuple(cohort for name, cohort in cohorts.items() if name != target_name)
 
 
 def _rename_source(result: TraceResult, source: str) -> TraceResult:
@@ -992,9 +1006,7 @@ def run_e1_matrix(
 
     for target_name in sorted(cohorts):
         target = cohorts[target_name]
-        foreign = tuple(
-            cohorts[name] for name in sorted(cohorts) if name != target_name
-        )
+        foreign = _foreign_cohorts(cohorts, target_name)
         bases = (
             *((cohort, (cohort,)) for cohort in foreign),
             (_pool_cohorts(foreign), foreign),

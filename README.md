@@ -150,6 +150,7 @@ python experiments/run_gate.py --quick   # smoke test
 python experiments/run_site_probe.py     # site-decodability diagnostic
 python experiments/run_e1.py --profile quick  # functional check; NON-REPORTABLE
 python experiments/run_e1.py --profile full   # registered, reportable E1 bundle
+python experiments/run_e1.py --migrate-v1     # normalize a complete v1 bundle without recomputation
 python -m pytest                         # deterministic synthetic test suite
 ```
 
@@ -159,3 +160,8 @@ inference counts match exactly. Complete cell and permutation-chunk checkpoints 
 reused; corrupt or incomplete checkpoints are recomputed. Both profiles default to
 eight single-threaded workers (`--workers` overrides this), without changing results.
 The PNG/PDF value and lift figures are rendered from the validated bundle CSVs.
+Bundle v2 stores local selections once in `e1_draws.csv`, fold definitions once
+in `e1_folds.csv`, loaded case metadata once in `e1_cohort_cases.csv`, and source
+composition once in `e1_source_bases.csv`. Together with cell-keyed predictions,
+these plain CSV relations reconstruct each warm and cold training membership
+exactly without the repeated rows used by bundle v1.
