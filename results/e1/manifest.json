@@ -95,6 +95,16 @@
         200
       ],
       "confirmatory": false,
+      "directions": [
+        {
+          "source": "COAD",
+          "target": "STAD"
+        },
+        {
+          "source": "STAD",
+          "target": "COAD"
+        }
+      ],
       "draw_ids": [
         0,
         1,
@@ -119,9 +129,8 @@
       ],
       "exploratory": true,
       "permutations": 0,
-      "source": "COAD",
+      "schema_version": "panmorph.swap.bundle/v2",
       "status": "complete",
-      "target": "STAD",
       "target_shares": [
         0,
         10,

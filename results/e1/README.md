@@ -1,178 +1,194 @@
-# What did foreign-organ training data buy us?
+# From “does transfer exist?” to “when is it useful?”
 
-We tested whether MSI labels from one organ can reduce the number of local labels
-needed for another organ. The model and frozen PRISM features were kept fixed.
+Phase 1 showed that MSI signal transfers in both directions between colon cancer
+(**COAD**) and stomach cancer (**STAD**) when the target organ contributes no training
+labels. This Phase-2 experiment asks the practical next question:
 
-The organs are:
+> Once local labels start arriving, how much does the foreign-organ data still help?
 
-- **COAD** — colon cancer
-- **STAD** — stomach cancer
-- **UCEC** — endometrial cancer
+Endometrial cancer (**UCEC**) is included as a weak-transfer comparison. All experiments
+use the same fixed logistic model and frozen PRISM features.
 
-## Bottom line
+This page reports the E1 value experiment and its fixed-budget follow-up. It does not
+answer the separate stronger-model/capacity question.
 
-1. **Colon data carried real signal for stomach cancer, but the measured performance
-   gain was small and uncertain.** With 10 local STAD-positive cases, adding COAD data
-   raised AUC from 0.788 to 0.802: a gain of 0.014. The uncertainty interval for that
-   gain included no improvement.
-2. **The complete COAD dataset was worth roughly 8 local STAD-positive cases.** The
-   plausible range was broad: about 4 to 20 cases.
-3. **UCEC was of little help for the two gastrointestinal cancers.** Its estimated value
-   was only 1.3 COAD-positive cases or 0.4 STAD-positive cases.
-4. **Adding a weak source could dilute a strong one.** Pooling UCEC with a useful GI
-   source reduced the estimated value in both GI targets.
-5. **At a fixed labeling budget, local STAD cases did most of the work.** Replacing a
-   small number of STAD cases with COAD cases sometimes gave a slightly higher point
-   estimate, but the differences were uncertain and did not support a general rule.
+## The answer in one minute
 
-The safe conclusion is: **cross-organ signal exists, but its practical value depends on
-the source, target, and amount of local data. There is no universal exchange rate for a
-foreign case.**
+1. **Both GI directions transfer at zero shot, but they do not have equal practical
+   value.** The reverse direction, STAD→COAD, retained useful signal for substantially
+   longer as local labels were added.
+2. **The complete COAD cohort was worth about 8 local STAD-positive cases.** Its
+   advantage was clear with 3–5 local positives but largely gone by 10.
+3. **The complete STAD cohort was worth about 32 local COAD-positive cases.** Its raw-AUC
+   advantage remained positive through 40 local positives. This result is exploratory
+   and sensitive to how scores from hospital-held-out folds are put on a common scale.
+4. **UCEC did not become a useful GI source.** Worse, adding UCEC to the strong GI source
+   diluted its estimated value, especially for COAD.
+5. **Foreign cases should not generally replace local cases at equal labeling cost.**
+   In the fixed-budget experiment, all-local training was usually better. The one near
+   tie occurred at the largest reverse-direction budget and was too uncertain to support
+   a sampling rule.
 
-## How to read the numbers
+The main new result is therefore not another zero-shot score. It is the finding that
+**foreign-data value decays at different rates in the two directions.**
 
-- **AUC** measures how well the model separates MSI-positive from MSI-negative patients.
-  `0.5` is chance; `1.0` is perfect separation.
-- Values in brackets are **95% uncertainty intervals**. Wider intervals mean less
-  certainty about the size of the effect.
-- **Equivalent local positives** asks: “How many local MSI-positive cases would a model
-  trained only on the target organ need to match the foreign-only model?”
-- `≥` means the upper end could not be measured before reaching all available local data.
+## What E1 adds beyond zero shot
 
-Two results that look contradictory answer different questions:
+Zero shot is the leftmost point, `k=0`: the model has all foreign labels and no local
+labels. E1 then gives both models the same `k` local MSI-positive cases, plus negatives at
+the target organ's natural prevalence:
 
-- The permutation result, **p=0.001**, says the COAD labels contain transferable signal;
-  none of the 999 shuffled-label runs matched the observed result.
-- The lift interval, **-0.031 to 0.061**, says the exact performance benefit at 10 local
-  positives is uncertain and could be negligible.
+- **Foreign + local:** complete foreign cohort plus those local cases.
+- **Local only:** exactly the same local cases, without the foreign cohort.
 
-So there is strong evidence of transferable predictive signal, but not strong evidence
-that its immediate AUC gain is large.
+Their AUC difference tells us what the foreign data added after controlling for the local
+training sample. The complete target cohort remains the test set at every point.
 
-## Main result: colon to stomach
+| Direction | Phase-1 zero-shot AUC | Added AUC at 3 local positives | Added AUC at 10 local positives | Complete foreign cohort worth |
+|---|---:|---:|---:|---:|
+| COAD→STAD | 0.760 | +0.121 [0.066, 0.177] | +0.014 [−0.031, 0.061] | 8.0 STAD positives [4.3, 19.7] |
+| STAD→COAD | 0.744 | +0.110 [0.057, 0.158] | +0.067 [0.022, 0.111] | 31.9 COAD positives [6.0, ≥59.2] |
 
-This was the only pre-registered confirmatory comparison. Both models received the same
-local training sample, built around 10 STAD-positive cases plus negatives at the natural
-STAD prevalence; the warm model also received the complete COAD dataset.
+![Warm and local-only value curves for every source and target](e1_value.png)
 
-| Model | Mean AUC | 95% interval |
-|---|---:|---:|
-| STAD cases only | 0.788 | 0.753 to 0.821 |
-| COAD plus the same STAD cases | 0.802 | 0.750 to 0.851 |
-| Difference | **+0.014** | **-0.031 to +0.061** |
+The first two panels are the important comparison:
 
-The complete COAD dataset was estimated to be worth **8.00 local STAD-positive cases**
-(4.31 to 19.71). Dividing by the 391 COAD patients gives an average of 0.0205 local
-positive cases per COAD patient. That average is useful for accounting, not as a claim
-that every COAD patient has equal value.
+- **COAD→STAD:** foreign data helped strongly at `k=3` and still helped at `k=5`.
+  By `k=10`, foreign+local AUC was 0.802 versus 0.788 for local-only—a small, uncertain
+  difference. With more local data, the point estimate became slightly negative.
+- **STAD→COAD:** foreign+local remained ahead of local-only through `k=40`; at that point
+  the lift was +0.054 [0.002, 0.107]. Even at the all-local endpoint the point estimate
+  remained positive, although its interval included zero.
 
-## What the other organ pairs suggested
+Only COAD→STAD at `k=10` was pre-registered for a confirmatory test. STAD→COAD is a
+prominent exploratory finding, not a second confirmed result.
 
-These comparisons are exploratory. They are useful patterns, not additional confirmed
-findings.
+![AUC added by foreign data for every source and target](e1_lift.png)
 
-| Foreign training data | Target | Equivalent local positive cases | Plain-language reading |
-|---|---|---:|---|
-| COAD | STAD | 8.00 [4.31, 19.71] | Useful transfer |
-| UCEC | STAD | 0.40 [0.00, 1.98] | Little measurable value |
-| COAD + UCEC | STAD | 6.22 [3.23, 12.76] | Less than COAD alone |
-| STAD | COAD | 31.93 [6.04, ≥59.20] | Potentially strong, but upper bound unresolved |
-| UCEC | COAD | 1.32 [0.03, 2.66] | Little measurable value |
-| STAD + UCEC | COAD | 2.98 [1.76, 17.77] | Much less than STAD alone |
-| COAD | UCEC | 6.40 [1.75, 17.66] | Modest exploratory value |
-| STAD | UCEC | 6.61 [1.87, 16.81] | Modest exploratory value |
-| COAD + STAD | UCEC | 4.17 [0.91, 11.55] | Pooling did not improve the estimate |
+The shaded `k=0` region is the Phase-1 zero-shot anchor. It is isolated because there is
+no trained local-only comparator at zero labels; the reference is chance AUC 0.5. The
+points at `k>0` are the Phase-2 answer: what foreign data added beyond the same local
+training set.
 
-The clearest descriptive pattern was that UCEC contributed little to COAD or STAD and
-reduced the estimated value when pooled with the stronger GI source.
+### Why p=0.001 can coexist with an interval crossing zero
 
-### A robustness warning
+These numbers answer different questions:
 
-For 33 of the 63 E1 summary cells, AUC changed by more than 0.01 when scores were ranked
-within each hospital-held-out fold. This means some results depend on how scores from
-different folds are put on a common scale. The reported raw AUC remains the primary
-metric; the rank analysis is only a warning flag.
+- The label-permutation result, `p=0.001`, says correctly paired COAD labels added more
+  value than the same number of COAD rows with their labels shuffled.
+- The lift interval, −0.031 to +0.061, says the exact AUC gain at 10 local STAD positives
+  could be negligible.
 
-## Fixed-budget experiment: should some STAD labels be replaced with COAD labels?
+So COAD carries real transferable signal, but its remaining performance gain at that
+particular local-data budget is small and uncertain.
 
-The first experiment added foreign data on top of local data. This second, exploratory
-experiment asked a stricter question: with a fixed budget of 50, 100, or 200 labeled
-patients, should any of those labels come from COAD instead of STAD?
+## What UCEC taught us
 
-The table shows three easy-to-interpret mixtures. Every estimate averages 20 repeated
-draws and evaluates the complete STAD cohort.
+UCEC remained a weak source for the two GI targets:
 
-| Total labeled patients | 100% COAD | 90% STAD + 10% COAD | 100% STAD |
-|---:|---:|---:|---:|
-| 50 | 0.517 [0.463, 0.574] | **0.774 [0.739, 0.808]** | 0.762 [0.726, 0.798] |
-| 100 | 0.566 [0.514, 0.622] | **0.822 [0.785, 0.859]** | 0.817 [0.777, 0.856] |
-| 200 | 0.643 [0.594, 0.690] | 0.847 [0.807, 0.884] | **0.851 [0.810, 0.891]** |
+- UCEC alone was worth 0.40 local STAD positives [0.00, 1.98].
+- UCEC alone was worth 1.32 local COAD positives [0.03, 2.66].
+- COAD+UCEC was worth 6.22 STAD positives, less than COAD alone at 8.00.
+- STAD+UCEC was worth 2.98 COAD positives, far less than STAD alone at 31.93.
 
-What this says:
+That last contrast is more informative than another zero-shot score: a weak organ can
+dilute a useful source after local labels are introduced. It motivates, but does not yet
+validate, methods that try to retain shared signal while ignoring non-sharing organs.
 
-- **COAD-only training was much worse than training with mostly or entirely STAD.**
-- With budgets of 50 and 100, the 90%-STAD mixture had a slightly higher point estimate
-  than 100% STAD. The intervals overlap heavily, so this is not evidence that replacing
-  STAD cases with COAD cases is reliably better.
-- With a budget of 200, 100% STAD had the highest of these three point estimates.
-- Score-ranking warnings appeared only in mixtures with no or very little STAD: 0% STAD
-  at every budget and 10% STAD at budget 50.
+## Fixed labeling budget: add foreign cases or replace local cases?
 
-### How much was one COAD case worth at a 50/50 mixture?
+E1 adds a complete foreign cohort on top of local data. The swap experiment asks a
+stricter and different question: if the total labeling budget is fixed at 50, 100, or 200
+patients, should any local cases be replaced by foreign cases?
 
-This calculation expresses the average COAD case in units of local STAD-positive cases.
+![Fixed-budget composition curves in both GI directions](swap_auc.png)
 
-| Total budget | Estimated value per COAD case | 95% interval |
-|---:|---:|---:|
-| 50 | +0.137 | -0.047 to +0.541 |
-| 100 | +0.104 | -0.118 to +0.497 |
-| 200 | -0.025 | -0.352 to +0.313 |
+The dashed line in each panel is the Phase-1 zero-shot AUC from the **complete** foreign
+cohort. The 0%-local points are lower because they use only 50, 100, or 200 sampled
+foreign cases.
 
-All three intervals include zero. We therefore cannot conclude that an average COAD case
-has consistently positive value at a 50/50 mixture.
+At a 50/50 split, the comparison was:
 
-At budget 200, the point estimate stayed negative from 50% through 90% STAD and became
-more negative as COAD became scarcer. Those intervals were wide and included zero; the
-90%-STAD upper bound also exceeded the measurable local-data range. This is an unstable,
-exploratory pattern—not evidence that COAD cases are universally harmful.
+| Foreign→target | Total cases | Half foreign / half local AUC | All-local AUC |
+|---|---:|---:|---:|
+| COAD→STAD | 50 | 0.714 [0.682, 0.747] | 0.762 [0.726, 0.798] |
+| COAD→STAD | 100 | 0.777 [0.739, 0.811] | 0.817 [0.777, 0.856] |
+| COAD→STAD | 200 | 0.815 [0.774, 0.854] | 0.851 [0.810, 0.891] |
+| STAD→COAD | 50 | 0.644 [0.603, 0.684] | 0.721 [0.677, 0.763] |
+| STAD→COAD | 100 | 0.718 [0.673, 0.760] | 0.756 [0.707, 0.803] |
+| STAD→COAD | 200 | 0.762 [0.712, 0.810] | 0.753 [0.696, 0.810] |
 
-At 100% STAD there are no COAD cases, so “value per COAD case” is undefined.
+All-local training had the higher point estimate in five of the six comparisons. The
+exception—STAD→COAD at 200 total cases—was a near tie with heavily overlapping
+intervals, not evidence that replacing COAD cases is better.
+
+### There is no stable “one foreign case equals X local cases” rule
+
+At the 50/50 mixture, the estimated local-case value of one foreign case changed sharply
+with budget:
+
+| Direction | Budget 50 | Budget 100 | Budget 200 |
+|---|---:|---:|---:|
+| One COAD case in STAD units | +0.137 [−0.047, +0.541] | +0.104 [−0.118, +0.497] | −0.025 [−0.352, +0.313] |
+| One STAD case in COAD units | −0.429 [−0.537, −0.081] | −0.012 [−0.285, +3.500] | +1.800 [−0.172, ≥2.128] |
+
+![Conditional average foreign-case equivalence](swap_equivalence.png)
+
+The wide and censored intervals are the result, not a plotting nuisance. They show that a
+single exchange rate would be misleading: value depends on direction, total budget, and
+the current source/target mixture.
+
+## Robustness warning
+
+The target is evaluated through five hospital-held-out folds. Scores from those five
+models are not always on exactly the same numerical scale. We therefore also ranked
+scores within each fold and flagged any result that changed by more than 0.01 AUC.
+
+The STAD→COAD E1 curve was flagged at every rung, and many reverse swap cells were also
+flagged. The raw pooled AUC remains the registered primary metric, but the reverse
+effect sizes should be read as promising rather than precise.
 
 ## What we can and cannot claim
 
-### Supported by the registered test
+Supported by the registered test:
 
-- COAD labels contain MSI signal that transfers to STAD when 10 local STAD-positive cases
-  are available (`p=0.001`).
-- The observed AUC gain was small, and its uncertainty interval included zero.
+- COAD labels contain real MSI signal that transfers to STAD when 10 local STAD-positive
+  cases are available (`p=0.001`).
+- The remaining AUC gain at that operating point was small and uncertain.
 
-### Exploratory only
+Exploratory findings:
 
-- UCEC appears to offer little value for COAD or STAD.
-- Pooling UCEC with a useful GI source may dilute that source.
-- A small COAD fraction may sometimes match an all-STAD budget, but this was not consistent
-  enough to recommend a universal sampling strategy.
-- The value of a COAD case changes with total budget and COAD/STAD mixture.
+- STAD may be substantially more valuable to COAD than COAD is to STAD.
+- UCEC can dilute a useful GI source rather than improve it.
+- At fixed labeling cost, local cases were usually more useful than foreign replacements.
 
-## Validation and detailed artifacts
+Not supported:
 
-The final test suite contains 80 deterministic tests. The reportable runs covered:
+- A universal foreign-to-local case exchange rate.
+- A recommendation to replace local labeling with foreign-organ labeling.
+- A claim that a stronger model would preserve or change this transfer map; that
+  capacity experiment has not been run.
 
-- all 1,224 registered E1 cells, 2,000 bootstraps, and 999 label permutations;
-- all 660 fixed-budget swap cells, 2,000 bootstraps, and no confirmatory permutations;
-- every patient exactly once in each out-of-fold evaluation;
-- exact Phase-1 anchor reproduction, with a maximum difference of `1.11e-16`;
-- schema, key, join, nesting, prevalence, and artifact-integrity checks.
+## Reproducibility
 
-The normalized audit tables can reconstruct every training set without storing millions
-of repeated rows. Exact values are available in:
+The reportable E1 run contains all 1,224 registered cells, 2,000 bootstrap replicates,
+and 999 label permutations for the sole confirmatory cell. The bidirectional swap adds:
 
-- `e1_summaries.csv` — E1 AUC and lift estimates
-- `e1_equivalence.csv` — local-positive equivalence estimates
-- `e1_confirmatory_null.csv` — the 999 shuffled-label results
-- `swap_summaries.csv` — fixed-budget AUC estimates
-- `swap_equivalence.csv` — budget- and mixture-specific COAD-case values
-- `manifest.json` — registered configuration and execution identity
+- 1,320 direction×budget×mixture×draw AUC cells;
+- 502,920 patient predictions;
+- 770,000 audited training selections;
+- 66 directional summaries and 66 case-equivalence estimates;
+- 2,000 bootstrap replicates and no confirmatory permutation test.
 
-All E1 claims outside the single COAD-to-STAD comparison at 10 local positives, and all
-fixed-budget swap results, remain exploratory.
+Every patient appears exactly once per out-of-fold evaluation. After removing the two
+new direction columns, the original COAD→STAD swap rows are numerically and row-for-row
+unchanged.
+
+Detailed values are in:
+
+- `e1_summaries.csv` — foreign+local, local-only, and lift estimates;
+- `e1_equivalence.csv` — complete-source value in local-positive units;
+- `e1_confirmatory_null.csv` — 999 shuffled-label results;
+- `swap_summaries.csv` — bidirectional fixed-budget AUC estimates;
+- `swap_equivalence.csv` — direction-, budget-, and mixture-specific case values;
+- `manifest.json` — configuration and execution identity.

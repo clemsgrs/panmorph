@@ -80,7 +80,7 @@ Cautions when citing:
   contradicts the (real) transfer result. Any mechanism probe must be pre-registered
   in a shared low-dimensional subspace.
 
-## Phase 2 — the value question (designed, not built)
+## Phase 2 — the value question (done)
 
 **RQ1 (primary): how many local positives is a foreign organ worth?**
 
@@ -93,37 +93,23 @@ is known: it simulates scarcity by subsampling the label-rich organs.
 The analysis works for any organ mix; prostate is simply the example with the
 strongest clinical motivation.
 
-Experiment **E1**: sweep k added target positives (prevalence-matched draws).
-Compare warm start (begin from the foreign-organ model) against cold start (local cases only).
-The gap between the curves is the value, in local labeled cases saved.
-Pre-registered confirmatory cell: **single-source COAD→STAD, k=10**
-(≈ a realistic 50-case local annotation budget).
-Statistic: paired lift Δ(k), averaged over fixed draw seeds; per-organ label-permutation null.
-Full specification: GitHub issue [panmorph#1](https://github.com/clemsgrs/panmorph/issues/1).
-It opens with a plain-language brief; the precise build spec follows below it.
-The first E1 tracer and its synthetic pytest coverage now establish the experiment seam.
-The registered matrix runner expands that seam over every single-source and pooled
-all-non-target base for COAD, STAD, and UCEC. It writes separate audit, prediction,
-and pooled-AUC tables only after its deterministic endpoints reproduce the committed
-Phase-1 results within `1e-6`.
-Registered inference then uses 2,000 paired, label-stratified patient bootstraps for
-mean raw warm/cold AUC and lift intervals. It reports rank sensitivity as a point plus
-flag, derives local-positive equivalence from the equal-weight isotonic cold curve with
-explicit censoring at `all`, and runs only the single-source COAD→STAD `k=10` test with
-999 coherent COAD-label permutations and the plus-one empirical p-value.
+Experiment **E1** sweeps the number of available local positives and compares
+foreign+local training with the same local cases alone. It covers the full COAD, STAD,
+and UCEC matrix. The pre-registered confirmatory cell is **COAD→STAD at k=10**;
+STAD→COAD and all other cells are exploratory.
 
-The downstream **budget-matched swap** keeps total assay counts fixed at 50, 100,
-or 200 while replacing COAD cases with STAD cases in ten-percentage-point steps.
-Each organ portion is sampled without replacement at its full-cohort prevalence;
-stratified orderings are reused within each fold and draw, so every portion is a
-nested prefix. The same complete site-grouped STAD OOF cohort and fixed logistic
-probe are used throughout. This analysis is exploratory: raw pooled OOF AUC is
-primary, rank AUC is an annotation, intervals use 2,000 patient bootstraps, and no
-permutation or confirmatory claim is made. Conditional average COAD-case
-equivalence is always reported with its budget and mixture, including negative,
-undefined target-only, and right-censored values.
+The downstream **budget-matched swap** holds the total labeled cohort at 50, 100, or
+200 cases, then varies the foreign/local mix in both GI directions. It asks whether
+foreign cases should replace local cases, rather than merely supplement them.
 
-**RQ2 (secondary): does a stronger model change the picture?**
+The central result is directional: COAD's value to STAD fades after roughly 8 local
+STAD-positive cases, while STAD's estimated value to COAD persists much longer but is
+more rank-sensitive. Under a fixed budget, all-local training usually wins. See the
+[plain-language Phase-2 results](results/e1/README.md) for the plots, numerical results,
+and limits of these claims. The full specification remains in
+[panmorph#1](https://github.com/clemsgrs/panmorph/issues/1).
+
+**Capacity question (not run): does a stronger model change the picture?**
 Try a newer foundation model (e.g. PRISM2) or a tile encoder with a trainable MIL
 aggregator (needs tile-level feature extraction).
 If a stronger model makes UCEC transfer, its wall was representational, not biological.
@@ -162,7 +148,7 @@ python experiments/run_site_probe.py     # site-decodability diagnostic
 python experiments/run_e1.py --profile quick  # functional check; NON-REPORTABLE
 python experiments/run_e1.py --profile full   # registered, reportable E1 bundle
 python experiments/run_e1.py --migrate-v1     # normalize a complete v1 bundle without recomputation
-python experiments/run_swap.py                # downstream exploratory COAD→STAD budget swap
+python experiments/run_swap.py                # exploratory bidirectional COAD↔STAD budget swap
 python experiments/run_swap.py --validate-only  # validate completed E1+swap artifacts
 python -m pytest                         # deterministic synthetic test suite
 ```
@@ -172,12 +158,13 @@ the stored code, feature/data identities, model/splitter, grids, seeds, rungs, a
 inference counts match exactly. Complete cell and permutation-chunk checkpoints are
 reused; corrupt or incomplete checkpoints are recomputed. Both profiles default to
 eight single-threaded workers (`--workers` overrides this), without changing results.
-The PNG/PDF value and lift figures are rendered from the validated bundle CSVs.
+The PNG/PDF value and lift figures show the complete 3×3 E1 matrix and are rendered
+from the validated bundle CSVs.
 Bundle v2 stores local selections once in `e1_draws.csv`, fold definitions once
 in `e1_folds.csv`, loaded case metadata once in `e1_cohort_cases.csv`, and source
 composition once in `e1_source_bases.csv`. Together with cell-keyed predictions,
 these plain CSV relations reconstruct each warm and cold training membership
 exactly without the repeated rows used by bundle v1.
-The swap runner enriches that completed bundle with auditable draw, prediction,
-AUC, summary, target-reference, and equivalence tables plus PNG/PDF composition
-and equivalence figures.
+The swap runner enriches that completed bundle with bidirectional auditable draw,
+prediction, AUC, summary, target-reference, and equivalence tables plus PNG/PDF
+composition and equivalence figures.

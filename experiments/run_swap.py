@@ -1,4 +1,4 @@
-"""Run the exploratory budget-matched COAD-to-STAD swap on completed E1."""
+"""Run the exploratory budget-matched COAD↔STAD swap on completed E1."""
 from __future__ import annotations
 
 import argparse

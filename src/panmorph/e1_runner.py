@@ -43,6 +43,12 @@ from .e1 import (
     trace_paired_cell,
     validate_phase1_anchors,
 )
+from .e1_plot import (
+    E1EquivalenceMark,
+    E1PlotCell,
+    E1PlotSpec,
+    build_e1_plot_spec,
+)
 
 BUNDLE_SCHEMA_VERSION = "panmorph.e1.bundle/v2"
 DEFAULT_WORKERS = 8
@@ -64,7 +70,8 @@ class E1Profile:
 
 PROFILES = {
     "quick": E1Profile(
-        "quick", False, ("COAD", "STAD"), (("COAD", "STAD"),),
+        "quick", False, ("COAD", "STAD"),
+        (("COAD", "STAD"), ("STAD", "COAD")),
         (0, 10, "all"), (0,), 50, 9, 3,
     ),
     "full": E1Profile(
@@ -204,7 +211,7 @@ def _write_json(path: Path, value: object) -> None:
 def _write_csv(path: Path, fieldnames: tuple[str, ...], rows: Iterable[Mapping]) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     with temporary.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
     temporary.replace(path)
@@ -1002,41 +1009,199 @@ def render_e1_figures(out: Path, *, validate: bool = True) -> None:
     """Render value and lift figures using only a validated on-disk bundle."""
     if validate:
         validate_e1_bundle(out)
+    manifest = json.loads((out / "manifest.json").read_text())
     rows = _read_csv(out / "e1_summaries.csv", SUMMARY_FIELDS)
-    numeric = lambda value: 1e9 if value == "all" else float(value)
-    ordered = sorted(rows, key=lambda row: (row["target"], row["source"], numeric(row["k"])))
-    labels = [f'{row["source"]}→{row["target"]}\nk={row["k"]}' for row in ordered]
-    divergent = [row["rank_diverged"] == "True" for row in ordered]
-    x = np.arange(len(ordered))
-    for kind, columns, ylabel, stem in (
-        ("value", ("warm_auc", "cold_auc"), "Raw pooled OOF AUC", "e1_value"),
-        ("lift", ("lift",), "Raw pooled OOF AUC lift", "e1_lift"),
-    ):
-        fig, ax = plt.subplots(figsize=(max(7, len(ordered) * 0.8), 4.8))
+    equivalence_rows = _read_csv(out / "e1_equivalence.csv", EQUIVALENCE_FIELDS)
+
+    def optional_float(value: str) -> float | None:
+        return None if value == "" else float(value)
+
+    cells = tuple(
+        E1PlotCell(
+            source=row["source"], target=row["target"], base=row["base"],
+            k=_rung(row["k"]),
+            warm=(float(row["warm_auc"]), float(row["warm_ci_lower"]),
+                  float(row["warm_ci_upper"])),
+            cold=(float(row["cold_auc"]), float(row["cold_ci_lower"]),
+                  float(row["cold_ci_upper"])),
+            lift=(float(row["lift"]), float(row["lift_ci_lower"]),
+                  float(row["lift_ci_upper"])),
+            rank_diverged=row["rank_diverged"] == "True",
+            confirmatory=row["confirmatory"] == "True",
+            permutation_p=optional_float(row["permutation_p"]),
+        )
+        for row in rows
+    )
+    equivalences = tuple(
+        E1EquivalenceMark(
+            source=row["source"], target=row["target"], base=row["base"],
+            point=optional_float(row["local_positive_equivalence"]),
+            lower=optional_float(row["local_ci_lower"]),
+            upper=optional_float(row["local_ci_upper"]),
+            point_censored=row["local_point_censored"] == "True",
+            lower_censored=row["local_ci_lower_censored"] == "True",
+            upper_censored=row["local_ci_upper_censored"] == "True",
+        )
+        for row in equivalence_rows
+    )
+    spec = build_e1_plot_spec(
+        cells, equivalences, reportable=bool(manifest["reportable"])
+    )
+    _render_e1_plot(spec, out, kind="value")
+    _render_e1_plot(spec, out, kind="lift")
+
+
+_RUNG_POSITIONS = {0: 0, 3: 1, 5: 2, 10: 3, 25: 4, 40: 5, "all": 6}
+
+
+def _equivalence_label(mark: E1EquivalenceMark | None) -> str | None:
+    if mark is None:
+        return None
+
+    def number(value: float | None, censored: bool) -> str:
+        if value is None:
+            return "beyond local range"
+        prefix = "≥" if censored else ""
+        return f"{prefix}{value:.1f}"
+
+    point = number(mark.point, mark.point_censored)
+    lower = number(mark.lower, mark.lower_censored)
+    upper = number(mark.upper, mark.upper_censored)
+    return f"Foreign-only ≈ {point} local positives\n95% interval: {lower} to {upper}"
+
+
+def _render_e1_plot(
+    spec: E1PlotSpec,
+    out: Path,
+    *,
+    kind: Literal["value", "lift"],
+) -> None:
+    """Render one semantic E1 plot specification without joining unrelated cells."""
+    n_columns = min(3, max(1, len(spec.panels)))
+    n_rows = (len(spec.panels) + n_columns - 1) // n_columns
+    fig, axes = plt.subplots(
+        n_rows, n_columns, figsize=(5.2 * n_columns, 3.7 * n_rows),
+        sharex=True, sharey=True, squeeze=False,
+    )
+    flat_axes = tuple(axes.flat)
+    warm_color = "#0072B2"
+    cold_color = "#4D4D4D"
+    for panel, ax in zip(spec.panels, flat_axes):
+        x = np.asarray([_RUNG_POSITIONS[cell.k] for cell in panel.cells])
+        phase2 = np.asarray([cell.k != 0 for cell in panel.cells])
+        ax.axvspan(-0.4, 0.4, color="#E8EEF6", alpha=0.8, zorder=0)
+        if panel.rank_sensitive:
+            ax.set_facecolor("#FFF8E7")
         if kind == "value":
-            ax.plot(x, [float(row[columns[0]]) for row in ordered], "o-", label="warm")
-            ax.plot(x, [float(row[columns[1]]) for row in ordered], "o-", label="cold")
-            ax.legend()
+            for field, color, label in (
+                ("warm", warm_color, "Foreign + same local cases"),
+                ("cold", cold_color, "Same local cases only"),
+            ):
+                estimates = np.asarray([getattr(cell, field) for cell in panel.cells])
+                ax.errorbar(
+                    x[~phase2], estimates[~phase2, 0],
+                    yerr=np.vstack((
+                        estimates[~phase2, 0] - estimates[~phase2, 1],
+                        estimates[~phase2, 2] - estimates[~phase2, 0],
+                    )),
+                    fmt="D", color=color, capsize=2, markersize=4,
+                )
+                ax.plot(
+                    x[phase2], estimates[phase2, 0], marker="o", color=color,
+                    linewidth=1.7, markersize=4, label=label,
+                )
+                ax.fill_between(
+                    x[phase2], estimates[phase2, 1], estimates[phase2, 2],
+                    color=color, alpha=0.13,
+                )
+            if panel.phase1_anchor is not None:
+                ax.axhline(
+                    panel.phase1_anchor[1], color=warm_color, linestyle="--",
+                    linewidth=0.8, alpha=0.55,
+                )
+            if panel.local_ceiling is not None:
+                ax.scatter(
+                    [_RUNG_POSITIONS["all"]], [panel.local_ceiling[1]],
+                    marker="s", s=32, color=cold_color, zorder=5,
+                )
+            label = _equivalence_label(panel.equivalence)
+            if label:
+                ax.text(
+                    0.98, 0.03, label, transform=ax.transAxes, ha="right",
+                    va="bottom", fontsize=7.5,
+                )
         else:
-            ax.axhline(0, color="0.5", linewidth=0.8)
+            estimates = np.asarray([cell.lift for cell in panel.cells])
+            ax.axhline(0, color="black", linewidth=0.9)
             ax.errorbar(
-                x, [float(row["lift"]) for row in ordered],
-                yerr=[
-                    [float(row["lift"]) - float(row["lift_ci_lower"]) for row in ordered],
-                    [float(row["lift_ci_upper"]) - float(row["lift"]) for row in ordered],
-                ], fmt="o",
+                x[~phase2], estimates[~phase2, 0],
+                yerr=np.vstack((
+                    estimates[~phase2, 0] - estimates[~phase2, 1],
+                    estimates[~phase2, 2] - estimates[~phase2, 0],
+                )),
+                fmt="D", color=warm_color, capsize=3, markersize=5,
             )
-        for index, flag in enumerate(divergent):
-            if flag:
-                ax.annotate("rank divergence", (index, ax.get_ylim()[1]), rotation=90,
-                            va="top", ha="center", fontsize=7, color="darkred")
-        ax.set_xticks(x, labels, rotation=45, ha="right")
-        ax.set_ylabel(ylabel)
-        ax.set_title(f"E1 {kind} ({'REPORTABLE' if json.loads((out / 'manifest.json').read_text())['reportable'] else 'QUICK — NON-REPORTABLE'})")
-        fig.tight_layout()
-        fig.savefig(out / f"{stem}.png", dpi=300)
-        fig.savefig(out / f"{stem}.pdf")
-        plt.close(fig)
+            ax.errorbar(
+                x[phase2], estimates[phase2, 0],
+                yerr=np.vstack((
+                    estimates[phase2, 0] - estimates[phase2, 1],
+                    estimates[phase2, 2] - estimates[phase2, 0],
+                )),
+                fmt="o-", color=warm_color, capsize=3, linewidth=1.5,
+                markersize=4,
+            )
+            mark = panel.confirmatory_mark
+            if mark is not None:
+                position = _RUNG_POSITIONS[mark[0]]
+                ax.scatter(
+                    [position], [mark[1]], s=120, facecolors="none",
+                    edgecolors="#D55E00", linewidths=2, zorder=5,
+                )
+                ax.annotate(
+                    f"Confirmatory p={mark[4]:.3f}", (position, mark[1]),
+                    xytext=(5, 10), textcoords="offset points", fontsize=7.5,
+                    color="#A54000",
+                )
+        title = f"{panel.source} → {panel.target}"
+        if panel.base == "pooled":
+            title += "  ·  pooled source"
+        if panel.rank_sensitive:
+            title += "  †"
+        ax.set_title(title, fontsize=10, fontweight="bold" if panel.gi_direction else None)
+        if panel.gi_direction:
+            for spine in ax.spines.values():
+                spine.set_color("#0072B2")
+                spine.set_linewidth(1.5)
+        ax.set_xticks(tuple(_RUNG_POSITIONS.values()), tuple(map(str, _RUNG_POSITIONS)))
+        ax.grid(axis="y", color="0.9", linewidth=0.6)
+    for ax in flat_axes[len(spec.panels):]:
+        ax.set_visible(False)
+    for ax in axes[-1, :]:
+        if ax.get_visible():
+            ax.set_xlabel("Local target MSI-positive cases (k)")
+    for ax in axes[:, 0]:
+        if ax.get_visible():
+            ax.set_ylabel("Raw pooled OOF AUC" if kind == "value" else "AUC added by foreign data")
+    title = (
+        "How long does foreign-organ signal remain useful as local labels arrive?"
+        if kind == "value"
+        else "How much did foreign data add beyond the same local training set?"
+    )
+    status = "REPORTABLE" if spec.reportable else "QUICK — NON-REPORTABLE"
+    fig.suptitle(f"{title}\n{status}", fontsize=15)
+    if kind == "value" and spec.panels:
+        handles, labels = flat_axes[0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.945), ncol=2)
+    fig.text(
+        0.5, 0.005,
+        "Shaded k=0 is the Phase-1 zero-shot anchor. k>0 asks what foreign data adds after the same local cases are available. † raw/rank score sensitivity.",
+        ha="center", fontsize=8,
+    )
+    fig.tight_layout(rect=(0, 0.025, 1, 0.91))
+    stem = f"e1_{kind}"
+    fig.savefig(out / f"{stem}.png", dpi=180)
+    fig.savefig(out / f"{stem}.pdf")
+    plt.close(fig)
 
 
 def run_e1_bundle(

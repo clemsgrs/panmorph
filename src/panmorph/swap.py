@@ -1,4 +1,4 @@
-"""Budget-matched COAD/STAD swap experiment on the E1 OOF scaffold."""
+"""Directional budget-matched swap experiment on the E1 OOF scaffold."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -44,6 +44,8 @@ def e1_case_coordinate(positive_cases: int, prevalence: float) -> float:
 
 @dataclass(frozen=True)
 class SwapDrawRecord:
+    source: str
+    target: str
     budget: int
     target_share: int
     draw_seed: int
@@ -57,6 +59,8 @@ class SwapDrawRecord:
 
 @dataclass(frozen=True)
 class SwapPredictionRecord:
+    source: str
+    target: str
     budget: int
     target_share: int
     draw_seed: int
@@ -69,6 +73,8 @@ class SwapPredictionRecord:
 
 @dataclass(frozen=True)
 class SwapAucRecord:
+    source: str
+    target: str
     budget: int
     target_share: int
     draw_seed: int
@@ -240,7 +246,7 @@ def trace_swap_cell(
     target_share: int,
     draw_seed: int,
 ) -> SwapTraceResult:
-    """Fit one budget/mixture draw and predict every STAD case out of fold."""
+    """Fit one budget/mixture draw and predict every target case out of fold."""
     if budget <= 0:
         raise ValueError("budget must be positive")
     if not 0 <= target_share <= 100:
@@ -279,14 +285,16 @@ def trace_swap_cell(
         for origin, cohort, cases in portions:
             draws.extend(
                 SwapDrawRecord(
-                    budget, target_share, draw_seed, fold, origin, cohort.name,
+                    source.name, target.name, budget, target_share, draw_seed,
+                    fold, origin, cohort.name,
                     case.case_id, case.label, case.site,
                 )
                 for case in cases
             )
         predictions.extend(
             SwapPredictionRecord(
-                budget, target_share, draw_seed, fold, held_out_sites,
+                source.name, target.name, budget, target_share, draw_seed,
+                fold, held_out_sites,
                 str(target.case_ids[index]), int(target.y[index]), float(score),
             )
             for index, score in zip(test_indices, scores)
@@ -303,7 +311,8 @@ def trace_swap_cell(
     return SwapTraceResult(
         tuple(draws), tuple(predictions),
         SwapAucRecord(
-            budget, target_share, draw_seed, auc.raw_auc, auc.rank_auc,
+            source.name, target.name, budget, target_share, draw_seed,
+            auc.raw_auc, auc.rank_auc,
             auc.rank_gap, auc.rank_diverged,
         ),
     )
