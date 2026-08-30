@@ -1,4 +1,4 @@
-# E1 full-profile result
+# Integrated E1 full-profile and exploratory swap result
 
 This is the reportable `panmorph.e1.bundle/v2` execution on the frozen PRISM
 embeddings. Raw pooled out-of-fold AUC is the primary metric. Rank-normalized AUC
@@ -55,6 +55,50 @@ or re-rank the raw-AUC results.
   would predict, chiefly for COAD-target and UCEC-source cells. Accordingly, the
   raw pooled OOF AUC remains primary and rank results remain annotations only.
 
+## Exploratory COAD-to-STAD budget swap
+
+The downstream swap held the total assay budget at 50, 100, or 200 cases while
+replacing COAD cases with STAD cases from 0% through 100% in ten-percentage-point
+steps. Each cell contains twenty nested draws. These are exploratory estimates;
+they are not confirmatory evidence and do not support a universal source-value
+claim.
+
+### Observed findings
+
+Raw pooled STAD OOF AUC is primary. At budget 50, it was 0.5172
+[0.4629, 0.5742] at 0% STAD, reached 0.7740 [0.7392, 0.8080] at 90% STAD, and
+was 0.7617 [0.7260, 0.7984] at 100% STAD. At budget 100, the corresponding
+0%, 90%, and 100% STAD estimates were 0.5665 [0.5144, 0.6221], 0.8219
+[0.7845, 0.8591], and 0.8170 [0.7767, 0.8556]. At budget 200, they were 0.6430
+[0.5945, 0.6902], 0.8466 [0.8067, 0.8841], and 0.8513
+[0.8099, 0.8912]. Rank AUC diverged from raw AUC only at budget 50 with 0% and
+10% STAD, budget 100 with 0% STAD, and budget 200 with 0% STAD; rank remains an
+annotation and does not replace the raw-AUC results.
+
+Conditional average COAD-case equivalence was 0.1371
+[-0.0471, 0.5412] at budget 50 with 50% STAD, 0.1036
+[-0.1185, 0.4972] at budget 100 with 50% STAD, and -0.0254
+[-0.3517, 0.3134] at budget 200 with 50% STAD. At budget 200, the point estimate
+remained negative with 60%, 70%, 80%, and 90% STAD: -0.0845
+[-0.4262, 0.2582], -0.2581 [-0.7214, 1.0611], -0.7295
+[-1.3444, 0.5559], and -1.5514 [-2.3773, ≥5.8400], respectively. The
+budget-200, 90%-STAD interval's upper endpoint was right-censored at the
+registered `all` coordinate. Target-only mixtures (100% STAD) have no source cases, so
+source-case equivalence is undefined at every budget. Negative values and the
+censoring indicator are retained in `swap_equivalence.csv`.
+
+### Findings versus expectations
+
+- The registered expectation that adding local STAD cases could improve STAD
+  discrimination was reflected conditionally at every registered budget: the
+  raw AUC with 90% STAD exceeded the raw AUC with 0% STAD at budgets 50, 100,
+  and 200. The estimates and intervals above show the magnitude and uncertainty.
+- The expectation that COAD cases could retain value under target scarcity was
+  not uniform across budgets or mixtures. At 90% STAD, conditional average
+  COAD-case equivalence was positive at budgets 50 and 100 but negative at
+  budget 200, where its upper interval endpoint was right-censored. This
+  contrast is descriptive and exploratory; the qualified estimates are above.
+
 ## Validation and audit
 
 The retained suite passed before reportable execution (`49 passed` at execution
@@ -73,3 +117,11 @@ Both the bundle validator and an explicit audit of schemas, uniqueness keys,
 joins, patient coverage, paired local draws, source-base composition, held-out-site
 exclusion, ordered null rows, figures, and complete/reportable manifest status
 passed.
+
+For the downstream swap, the retained suite passed before execution (`80
+passed`). The reportable run produced 385,000 draw rows, 244,860 prediction rows,
+660 draw-level AUC rows, 33 summary rows, 10 target-reference rows, 33
+equivalence rows, and four PNG/PDF figures. Strict validation passed the schemas,
+configured keys and joins, nested-prefix invariants, complete 371-patient STAD
+OOF coverage in every draw cell, prevalence-matched composition, reproducibility
+of derived results, figure signatures, and complete exploratory manifest status.
