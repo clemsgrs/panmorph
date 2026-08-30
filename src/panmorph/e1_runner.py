@@ -8,6 +8,7 @@ import json
 import subprocess
 import tempfile
 import time
+from collections import Counter
 from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 from typing import Iterable, Literal, Mapping
@@ -29,6 +30,7 @@ from .e1 import (
     Rung,
     TraceResult,
     _pool_cohorts,
+    _foreign_cohorts,
     _restore_pooled_provenance,
     confirmatory_observed,
     empirical_superiority_p,
@@ -340,7 +342,7 @@ def _execution_specs(profile: E1Profile, cohorts: Mapping[str, Cohort]):
     else:
         bases = []
         for target_name in sorted(profile.cohorts):
-            foreign = tuple(cohorts[name] for name in cohorts if name != target_name)
+            foreign = _foreign_cohorts(cohorts, target_name)
             bases.extend((source, cohorts[target_name], (source,)) for source in foreign)
             bases.append((_pool_cohorts(foreign), cohorts[target_name], foreign))
     specs = []
@@ -391,9 +393,11 @@ def _run_cells(out: Path, profile: E1Profile, cohorts: Mapping[str, Cohort], wor
             missing.append((index, spec, path))
         else:
             results[index] = cached
-    phase1_endpoints = [
-        item for item in missing if item[1][3] == 0 and item[1][5] == "warm"
-    ]
+    def is_phase1_endpoint(item) -> bool:
+        _, (_, _, _, k, _, arm), _ = item
+        return k == 0 and arm == "warm"
+
+    phase1_endpoints = [item for item in missing if is_phase1_endpoint(item)]
     worker_cells = [item for item in missing if item not in phase1_endpoints]
     for index, spec, path in phase1_endpoints:
         result = _execute_cell(spec)
@@ -549,7 +553,12 @@ def rebuild_e1_reports(out: Path) -> None:
     _write_derived_tables(out, predictions, inference, confirmatory)
 
 
-def validate_e1_bundle(out: Path) -> None:
+def validate_e1_bundle(
+    out: Path,
+    *,
+    require_reportable: bool = False,
+    require_complete: bool = False,
+) -> None:
     """Validate public schemas and material joins in a completed E1 bundle."""
     manifest_path = out / "manifest.json"
     if not manifest_path.is_file():
@@ -557,6 +566,10 @@ def validate_e1_bundle(out: Path) -> None:
     manifest = json.loads(manifest_path.read_text())
     if manifest.get("schema_version") != BUNDLE_SCHEMA_VERSION:
         raise ValueError("unsupported E1 bundle schema version")
+    if require_reportable and manifest.get("reportable") is not True:
+        raise ValueError("bundle is not reportable")
+    if require_complete and manifest.get("status") != "complete":
+        raise ValueError("bundle is not complete")
     draws = _read_csv(out / "e1_draws.csv", DRAW_FIELDS)
     predictions = _read_csv(out / "e1_predictions.csv", PREDICTION_FIELDS)
     aucs = _read_csv(out / "e1_aucs.csv", AUC_FIELDS)
@@ -580,12 +593,62 @@ def validate_e1_bundle(out: Path) -> None:
     if not draw_keys <= prediction_keys:
         raise ValueError("draw-to-prediction join is incomplete")
     prediction_patients: dict[tuple[str, str, str, str, str], set[str]] = {}
+    prediction_folds: Counter[tuple[str, str, str, str, str, str]] = Counter()
     for row in predictions:
         key = (row["source"], row["target"], row["arm"], row["k"], row["draw_seed"])
         patients = prediction_patients.setdefault(key, set())
         if row["case_id"] in patients:
             raise ValueError("prediction grain contains a duplicate patient")
         patients.add(row["case_id"])
+        prediction_folds[key + (row["fold"],)] += 1
+    for key, patients in prediction_patients.items():
+        expected_patients = int(manifest["cohorts"][key[1]]["cases"])
+        if len(patients) != expected_patients:
+            raise ValueError("prediction row coverage is incomplete")
+    expected_draw_keys = {
+        key for key in prediction_keys
+        if not (key[2] == "cold" and key[3] == "0")
+    }
+    draw_grain = set()
+    draw_counts: Counter[tuple[str, str, str, str, str, str, str]] = Counter()
+    for row in draws:
+        key = (row["source"], row["target"], row["arm"], row["k"], row["draw_seed"])
+        grain = key + (
+            row["fold"], row["origin"], row["cohort"], row["case_id"]
+        )
+        if grain in draw_grain:
+            raise ValueError("draw grain contains a duplicate row")
+        draw_grain.add(grain)
+        if (
+            row["origin"] == "target"
+            and row["site"] in set(ast.literal_eval(row["held_out_sites"]))
+        ):
+            raise ValueError("draw audit includes a held-out site")
+        draw_counts[key + (row["fold"], row["origin"])] += 1
+    if draw_keys != expected_draw_keys:
+        raise ValueError("draw-to-prediction join is incomplete")
+    for key in expected_draw_keys:
+        target = key[1]
+        cases = int(manifest["cohorts"][target]["cases"])
+        positives = int(manifest["cohorts"][target]["positives"])
+        for fold in map(str, range(5)):
+            if key[3] == "all":
+                expected_target = cases - prediction_folds[key + (fold,)]
+            else:
+                k = int(key[3])
+                expected_target = k + round(k * (cases - positives) / positives)
+            expected_source = (
+                sum(
+                    int(manifest["cohorts"][source]["cases"])
+                    for source in key[0].split("+")
+                )
+                if key[2] == "warm" else 0
+            )
+            if (
+                draw_counts[key + (fold, "target")] != expected_target
+                or draw_counts[key + (fold, "source")] != expected_source
+            ):
+                raise ValueError("draw audit row coverage is incomplete")
     warm_cells = {(row["source"], row["target"], row["k"]) for row in aucs if row["arm"] == "warm"}
     summary_cells = {(row["source"], row["target"], row["k"]) for row in summaries}
     if warm_cells != summary_cells:

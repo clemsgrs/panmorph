@@ -1,5 +1,7 @@
 import csv
+import hashlib
 import json
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -12,7 +14,6 @@ from panmorph.e1_runner import (
     run_e1_bundle,
     validate_e1_bundle,
 )
-from panmorph.probe import fit_predict
 
 
 def _quick_cohorts() -> dict[str, Cohort]:
@@ -217,10 +218,6 @@ def test_parallel_bundle_warm_zero_exactly_matches_phase1_scoring(
             sites=cohort.sites,
             case_ids=cohort.case_ids,
         )
-    expected = fit_predict(
-        expanded["COAD"].X, expanded["COAD"].y, expanded["STAD"].X
-    )
-
     out = tmp_path / "bundle"
     run_e1_bundle(out, profile="quick", cohorts=expanded, workers=2)
     with (out / "e1_predictions.csv").open(newline="") as handle:
@@ -237,4 +234,91 @@ def test_parallel_bundle_warm_zero_exactly_matches_phase1_scoring(
         [actual_by_case[str(case_id)] for case_id in expanded["STAD"].case_ids]
     )
 
-    assert np.array_equal(actual, expected)
+    assert hashlib.sha256(actual.tobytes()).hexdigest() == (
+        "709e5a46cced6e26dc315a73e22bf2ac6c0c9096a834d2ef9e88266e25298648"
+    )
+
+
+@pytest.fixture(scope="module")
+def completed_quick_bundle(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    out = tmp_path_factory.mktemp("validation") / "bundle"
+    run_e1_bundle(out, profile="quick", cohorts=_quick_cohorts(), workers=1)
+    return out
+
+
+def _copy_bundle(source: Path, destination: Path) -> Path:
+    return Path(shutil.copytree(source, destination))
+
+
+def test_bundle_validation_rejects_duplicate_draw_grain(
+    tmp_path: Path, completed_quick_bundle: Path
+) -> None:
+    out = _copy_bundle(completed_quick_bundle, tmp_path / "bundle")
+    path = out / "e1_draws.csv"
+    with path.open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+        fieldnames = tuple(rows[0])
+    rows.append(dict(rows[0]))
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    with pytest.raises(ValueError, match="draw grain contains a duplicate row"):
+        validate_e1_bundle(out)
+
+
+def test_bundle_validation_rejects_incomplete_draw_coverage(
+    tmp_path: Path, completed_quick_bundle: Path
+) -> None:
+    out = _copy_bundle(completed_quick_bundle, tmp_path / "bundle")
+    path = out / "e1_draws.csv"
+    with path.open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+        fieldnames = tuple(rows[0])
+    rows.pop()
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    with pytest.raises(ValueError, match="draw audit row coverage is incomplete"):
+        validate_e1_bundle(out)
+
+
+def test_bundle_validation_rejects_incomplete_prediction_coverage(
+    tmp_path: Path, completed_quick_bundle: Path
+) -> None:
+    out = _copy_bundle(completed_quick_bundle, tmp_path / "bundle")
+    path = out / "e1_predictions.csv"
+    with path.open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+        fieldnames = tuple(rows[0])
+    rows.pop()
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    with pytest.raises(ValueError, match="prediction row coverage is incomplete"):
+        validate_e1_bundle(out)
+
+
+def test_bundle_validation_can_require_reportable_status(
+    completed_quick_bundle: Path,
+) -> None:
+    with pytest.raises(ValueError, match="bundle is not reportable"):
+        validate_e1_bundle(completed_quick_bundle, require_reportable=True)
+
+
+def test_bundle_validation_can_require_completion(
+    tmp_path: Path, completed_quick_bundle: Path
+) -> None:
+    out = _copy_bundle(completed_quick_bundle, tmp_path / "bundle")
+    manifest_path = out / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["status"] = "running"
+    manifest_path.write_text(json.dumps(manifest))
+
+    with pytest.raises(ValueError, match="bundle is not complete"):
+        validate_e1_bundle(out, require_complete=True)

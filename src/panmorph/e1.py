@@ -944,6 +944,13 @@ def _pool_cohorts(cohorts: tuple[Cohort, ...]) -> Cohort:
     )
 
 
+def _foreign_cohorts(
+    cohorts: Mapping[str, Cohort], target_name: str
+) -> tuple[Cohort, ...]:
+    """Return foreign cohorts in their registered row order."""
+    return tuple(cohort for name, cohort in cohorts.items() if name != target_name)
+
+
 def _rename_source(result: TraceResult, source: str) -> TraceResult:
     return TraceResult(
         draws=tuple(replace(record, source=source) for record in result.draws),
@@ -999,9 +1006,7 @@ def run_e1_matrix(
 
     for target_name in sorted(cohorts):
         target = cohorts[target_name]
-        foreign = tuple(
-            cohorts[name] for name in cohorts if name != target_name
-        )
+        foreign = _foreign_cohorts(cohorts, target_name)
         bases = (
             *((cohort, (cohort,)) for cohort in foreign),
             (_pool_cohorts(foreign), foreign),

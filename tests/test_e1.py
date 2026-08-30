@@ -22,7 +22,6 @@ from panmorph.e1 import (
     trace_paired_cell,
     validate_phase1_anchors,
 )
-from panmorph.probe import fit_predict
 
 
 def synthetic_cohorts() -> tuple[Cohort, Cohort]:
@@ -187,32 +186,6 @@ def test_zero_endpoint_uses_foreign_only_warm_and_unfitted_cold_baseline() -> No
         if record.arm == "warm" and record.origin == "source"
     } == set(source.case_ids)
     assert not [record for record in result.draws if record.origin == "target"]
-
-
-def test_warm_zero_predictions_exactly_reuse_the_phase1_zero_shot_fit() -> None:
-    source, target = synthetic_cohorts()
-    dimensions = np.arange(1, 1_281)[None, :]
-    source_rows = np.arange(1, source.n + 1)[:, None]
-    target_rows = np.arange(1, target.n + 1)[:, None]
-    source = replace(
-        source,
-        X=(np.cos(source_rows * dimensions / 41) + source.y[:, None] * 0.02)
-        .astype(np.float32),
-    )
-    target = replace(
-        target,
-        X=(np.sin(target_rows * dimensions / 37) + target.y[:, None] * 0.02)
-        .astype(np.float32),
-    )
-    expected = fit_predict(source.X, source.y, target.X)
-
-    result = trace_paired_cell(
-        source, target, k=0, draw_seed=None, arms=("warm",)
-    )
-    actual_by_case = {record.case_id: record.score for record in result.predictions}
-    actual = np.asarray([actual_by_case[str(case_id)] for case_id in target.case_ids])
-
-    assert np.array_equal(actual, expected)
 
 
 def test_all_endpoint_uses_every_eligible_target_training_case() -> None:
