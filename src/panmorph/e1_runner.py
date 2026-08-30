@@ -547,7 +547,7 @@ def migrate_e1_bundle_v1_to_v2(out: Path) -> Path:
     if manifest.get("status") != "complete":
         raise ValueError("v1 migration requires a complete bundle")
     draws = _iter_csv(out / "e1_draws.csv", DRAW_FIELDS)
-    predictions = _read_csv(out / "e1_predictions.csv", PREDICTION_FIELDS)
+    prediction_path = out / "e1_predictions.csv"
 
     local_draws = {}
     folds = {}
@@ -582,7 +582,7 @@ def migrate_e1_bundle_v1_to_v2(out: Path) -> Path:
             if case_key not in seen:
                 source_case_order.setdefault(row["cohort"], []).append(case_key)
                 seen.add(case_key)
-    for row in predictions:
+    for row in _iter_csv(prediction_path, PREDICTION_FIELDS):
         fold_key = (row["target"], row["fold"])
         held_out_sites = row["held_out_sites"]
         if fold_key in folds and folds[fold_key]["held_out_sites"] != held_out_sites:
@@ -626,7 +626,7 @@ def migrate_e1_bundle_v1_to_v2(out: Path) -> Path:
         _write_csv(staged / "e1_source_bases.csv", SOURCE_BASE_FIELDS, source_bases.values())
         _write_csv(staged / "e1_predictions.csv", BUNDLE_PREDICTION_FIELDS, (
             {name: row[name] for name in BUNDLE_PREDICTION_FIELDS}
-            for row in predictions
+            for row in _iter_csv(prediction_path, PREDICTION_FIELDS)
         ))
         _write_json(staged / "manifest.json", manifest)
         for name in (
@@ -725,11 +725,25 @@ def rebuild_e1_reports(out: Path) -> None:
     _write_derived_tables(out, predictions, inference, confirmatory)
 
 
-def validate_e1_bundle(
+def _verify_report_reproducibility(out: Path) -> None:
+    predictions, inference, confirmatory = _derive_reports(out)
+    with tempfile.TemporaryDirectory(prefix="panmorph-e1-validate-") as temporary:
+        expected = Path(temporary)
+        _write_derived_tables(expected, predictions, inference, confirmatory)
+        for name in (
+            "e1_aucs.csv", "e1_summaries.csv", "e1_equivalence.csv",
+            "e1_confirmatory_null.csv",
+        ):
+            if (out / name).read_bytes() != (expected / name).read_bytes():
+                raise ValueError(f"stored {name} is not reproducible from bundle inputs")
+
+
+def _validate_e1_bundle(
     out: Path,
     *,
     require_reportable: bool = False,
     require_complete: bool = False,
+    verify_reports: bool = True,
 ) -> None:
     """Validate public schemas and material joins in a completed E1 bundle."""
     manifest_path = out / "manifest.json"
@@ -965,23 +979,29 @@ def validate_e1_bundle(
                 ),
                 tuple(csv.DictReader(handle)),
             )
-    predictions_records, inference, confirmatory = _derive_reports(out)
-    with tempfile.TemporaryDirectory(prefix="panmorph-e1-validate-") as temporary:
-        expected = Path(temporary)
-        _write_derived_tables(
-            expected, predictions_records, inference, confirmatory
-        )
-        for name in (
-            "e1_aucs.csv", "e1_summaries.csv", "e1_equivalence.csv",
-            "e1_confirmatory_null.csv",
-        ):
-            if (out / name).read_bytes() != (expected / name).read_bytes():
-                raise ValueError(f"stored {name} is not reproducible from bundle inputs")
+    if verify_reports:
+        _verify_report_reproducibility(out)
 
 
-def render_e1_figures(out: Path) -> None:
+def validate_e1_bundle(
+    out: Path,
+    *,
+    require_reportable: bool = False,
+    require_complete: bool = False,
+) -> None:
+    """Validate structure and reproducibility of a completed E1 bundle."""
+    _validate_e1_bundle(
+        out,
+        require_reportable=require_reportable,
+        require_complete=require_complete,
+        verify_reports=True,
+    )
+
+
+def render_e1_figures(out: Path, *, validate: bool = True) -> None:
     """Render value and lift figures using only a validated on-disk bundle."""
-    validate_e1_bundle(out)
+    if validate:
+        validate_e1_bundle(out)
     rows = _read_csv(out / "e1_summaries.csv", SUMMARY_FIELDS)
     numeric = lambda value: 1e9 if value == "all" else float(value)
     ordered = sorted(rows, key=lambda row: (row["target"], row["source"], numeric(row["k"])))
@@ -1060,10 +1080,16 @@ def run_e1_bundle(
         for index, value in enumerate(confirmatory.null_lifts)
     ))
     rebuild_e1_reports(out)
-    render_e1_figures(out)
+    validate_e1_bundle(out)
+    render_e1_figures(out, validate=False)
     completed = dict(planned)
     completed["status"] = "complete"
     completed["elapsed_seconds"] = time.monotonic() - started
     _write_json(manifest_path, completed)
-    validate_e1_bundle(out, require_reportable=selected.reportable, require_complete=True)
+    _validate_e1_bundle(
+        out,
+        require_reportable=selected.reportable,
+        require_complete=True,
+        verify_reports=False,
+    )
     return out

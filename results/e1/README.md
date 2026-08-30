@@ -59,7 +59,7 @@ or re-rank the raw-AUC results.
 
 The retained suite passed before reportable execution (`49 passed` at execution
 revision `6db5bf8`), and the expanded post-review suite passed afterward
-(`57 passed` after normalized-bundle validation). The full run executed
+(`58 passed` after normalized-bundle validation). The full run executed
 1,224 unique AUC cells and 509,592 predictions, covering every registered target,
 single/pooled base, arm, rung, and draw. It used 2,000 paired label-stratified
 bootstraps and 999 coherent permutations. The normalized audit stores 123,796

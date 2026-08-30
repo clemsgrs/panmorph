@@ -99,6 +99,26 @@ def test_quick_runner_emits_complete_non_reportable_bundle(tmp_path: Path) -> No
         assert len(tuple(csv.DictReader(handle))) == 9
 
 
+def test_runner_derives_inference_only_for_write_and_verification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = 0
+    original = runner_module.estimate_e1_matrix
+
+    def recording_estimate(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(runner_module, "estimate_e1_matrix", recording_estimate)
+
+    run_e1_bundle(
+        tmp_path / "bundle", profile="quick", cohorts=_quick_cohorts(), workers=1
+    )
+
+    assert calls == 2
+
+
 def test_bundle_validation_rejects_a_schema_failure(tmp_path: Path) -> None:
     out = tmp_path / "bundle"
     run_e1_bundle(out, profile="quick", cohorts=_quick_cohorts(), workers=1)
@@ -156,6 +176,11 @@ def test_v1_migration_normalizes_repeated_audit_membership(tmp_path: Path) -> No
         {"cohort": "COAD", "case_id": "c1", "label": "1", "site": "A"},
         {"cohort": "STAD", "case_id": "t1", "label": "1", "site": "A"},
         {"cohort": "STAD", "case_id": "t2", "label": "0", "site": "B"},
+    ]
+    assert _read_csv_rows(out / "e1_predictions.csv")[1] == [
+        {"draw_seed": "0", "k": "10", "fold": "0", "arm": "warm",
+         "source": "COAD", "target": "STAD", "case_id": "t2", "label": "0",
+         "score": "0.25"},
     ]
     assert json.loads((out / "manifest.json").read_text())["schema_version"] == "panmorph.e1.bundle/v2"
 
