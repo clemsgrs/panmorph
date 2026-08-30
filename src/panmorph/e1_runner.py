@@ -35,6 +35,7 @@ from .e1 import (
     evaluate_confirmatory_null,
     estimate_e1_matrix,
     preflight_rungs,
+    sample_rung,
     source_label_permutations,
     summarize_predictions,
     trace_paired_cell,
@@ -242,6 +243,7 @@ def _load_cell(
     path: Path,
     *,
     source: str,
+    source_cohort: Cohort,
     target: Cohort,
     k: Rung,
     draw_seed: int | None,
@@ -259,6 +261,41 @@ def _load_cell(
     except (ValueError, KeyError, TypeError, SyntaxError):
         return None
     expected_key = (draw_seed, k, arm, source, target.name)
+    by_fold = {
+        fold: [row for row in predictions if row.fold == fold]
+        for fold in range(5)
+    }
+    draws_complete = True
+    expected_draw_count = 0
+    for fold, fold_predictions in by_fold.items():
+        if not fold_predictions:
+            draws_complete = False
+            break
+        held_out_sites = fold_predictions[0].held_out_sites
+        expected_local = {
+            row.case_id for row in sample_rung(target, held_out_sites, k, draw_seed)
+        }
+        actual_local = [
+            row.case_id for row in draws
+            if row.fold == fold and row.origin == "target"
+        ]
+        expected_source = (
+            set(map(str, source_cohort.case_ids)) if arm == "warm" else set()
+        )
+        expected_draw_count += len(expected_local) + len(expected_source)
+        actual_source = [
+            row.case_id for row in draws
+            if row.fold == fold and row.origin == "source"
+        ]
+        if (
+            len(actual_local) != len(expected_local)
+            or set(actual_local) != expected_local
+            or len(actual_source) != len(expected_source)
+            or set(actual_source) != expected_source
+        ):
+            draws_complete = False
+            break
+    draws_complete = draws_complete and len(draws) == expected_draw_count
     if (
         len(predictions) != target.n
         or {row.case_id for row in predictions} != set(map(str, target.case_ids))
@@ -267,6 +304,7 @@ def _load_cell(
             or not np.isfinite(row.score)
             for row in predictions
         )
+        or not draws_complete
         or any(
             (row.draw_seed, row.k, row.arm, row.source, row.target) != expected_key
             for row in draws
@@ -343,6 +381,7 @@ def _run_cells(out: Path, profile: E1Profile, cohorts: Mapping[str, Cohort], wor
         cached = _load_cell(
             path,
             source="target-only" if arm == "cold" else source.name,
+            source_cohort=source,
             target=target,
             k=k,
             draw_seed=draw,
@@ -382,6 +421,8 @@ def _run_permutations(out, profile, cohorts, predictions, workers) -> Confirmato
                 rows = _read_csv(path, NULL_FIELDS)
                 if [int(row["permutation"]) for row in rows] == list(range(start, stop)):
                     cached = np.asarray([float(row["null_mean_lift"]) for row in rows])
+                    if not np.all(np.isfinite(cached)):
+                        cached = None
             except (ValueError, KeyError):
                 pass
         if cached is None:

@@ -116,21 +116,18 @@ def test_compatible_resume_uses_complete_cell_and_permutation_checkpoints(
     assert (out / "e1_predictions.csv").read_bytes() == expected
 
 
-def test_resume_recomputes_a_semantically_corrupt_cell_checkpoint(
+def test_resume_recomputes_incomplete_cell_and_permutation_checkpoints(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     out = tmp_path / "bundle"
     cohorts = _quick_cohorts()
     run_e1_bundle(out, profile="quick", cohorts=cohorts, workers=1)
-    checkpoint = next((out / "checkpoints" / "cells").glob("*/predictions.csv"))
-    with checkpoint.open(newline="") as handle:
-        rows = list(csv.DictReader(handle))
-        fieldnames = tuple(rows[0])
-    rows[0]["score"] = "nan"
-    with checkpoint.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+    checkpoint = next(
+        path
+        for path in (out / "checkpoints" / "cells").glob("*/draws.csv")
+        if len(path.read_text().splitlines()) > 1
+    )
+    checkpoint.write_text(",".join(runner_module.DRAW_FIELDS) + "\n")
     original = runner_module.trace_paired_cell
     calls = 0
 
@@ -143,6 +140,29 @@ def test_resume_recomputes_a_semantically_corrupt_cell_checkpoint(
     run_e1_bundle(out, profile="quick", cohorts=cohorts, workers=1)
 
     assert calls == 1
+    validate_e1_bundle(out)
+
+    permutation = next((out / "checkpoints" / "permutations").glob("*.csv"))
+    with permutation.open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+        fieldnames = tuple(rows[0])
+    rows[0]["null_mean_lift"] = "nan"
+    with permutation.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    original_null = runner_module.evaluate_confirmatory_null
+    null_calls = 0
+
+    def recording_null(*args, **kwargs):
+        nonlocal null_calls
+        null_calls += 1
+        return original_null(*args, **kwargs)
+
+    monkeypatch.setattr(runner_module, "evaluate_confirmatory_null", recording_null)
+    run_e1_bundle(out, profile="quick", cohorts=cohorts, workers=1)
+
+    assert null_calls == 1
     validate_e1_bundle(out)
 
 
