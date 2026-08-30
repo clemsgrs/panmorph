@@ -148,7 +148,14 @@ It becomes a real question only after more MSI-labeled organs join the matrix.
 python experiments/run_gate.py           # full gate: 1000 perms, 2000 bootstraps
 python experiments/run_gate.py --quick   # smoke test
 python experiments/run_site_probe.py     # site-decodability diagnostic
-python experiments/run_e1.py --generate  # generate the full E1 matrix, then infer
-python experiments/run_e1.py             # infer from stored issue-#6 predictions
+python experiments/run_e1.py --profile quick  # functional check; NON-REPORTABLE
+python experiments/run_e1.py --profile full   # registered, reportable E1 bundle
 python -m pytest                         # deterministic synthetic test suite
 ```
+
+E1 writes a versioned bundle under `results/e1/` by default. It resumes only when
+the stored code, feature/data identities, model/splitter, grids, seeds, rungs, and
+inference counts match exactly. Complete cell and permutation-chunk checkpoints are
+reused; corrupt or incomplete checkpoints are recomputed. Both profiles default to
+eight single-threaded workers (`--workers` overrides this), without changing results.
+The PNG/PDF value and lift figures are rendered from the validated bundle CSVs.

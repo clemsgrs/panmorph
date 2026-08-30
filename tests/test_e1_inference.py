@@ -304,6 +304,45 @@ def test_confirmatory_null_reuses_one_source_shuffle_across_all_draws(
     assert serial.p_value == parallel.p_value
 
 
+def test_confirmatory_test_uses_the_configured_draw_schedule(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    labels = np.asarray([0, 0, 1, 1])
+    source = Cohort(
+        "COAD", np.arange(8, dtype=np.float32).reshape(4, 2), labels,
+        np.asarray(["A", "A", "B", "B"]), np.asarray([f"S{i}" for i in range(4)]),
+    )
+    target = Cohort(
+        "STAD", np.arange(8, dtype=np.float32).reshape(4, 2), labels,
+        np.asarray(["A", "B", "C", "D"]), np.asarray([f"T{i}" for i in range(4)]),
+    )
+    predictions = tuple(
+        PredictionRecord(
+            7, 10, index, (str(index),), arm,
+            "COAD" if arm == "warm" else "target-only", "STAD", f"T{index}",
+            int(label), score,
+        )
+        for arm, scores in (("warm", (0.1, 0.2, 0.8, 0.9)),
+                            ("cold", (0.1, 0.8, 0.2, 0.9)))
+        for index, (label, score) in enumerate(zip(labels, scores))
+    )
+
+    monkeypatch.setattr(
+        e1_module,
+        "trace_paired_cell",
+        lambda *_args, **_kwargs: TraceResult(
+            (), (), (AucRecord(7, 10, "warm", "COAD", "STAD", 0.5, 0.5, 0, False),)
+        ),
+    )
+
+    result = run_confirmatory_test(
+        source, target, predictions, draw_ids=(7,), n_permutations=2, n_jobs=1
+    )
+
+    assert result.n_permutations == 2
+    assert result.p_value == pytest.approx(1 / 3)
+
+
 def test_inference_writer_assigns_a_p_value_only_to_the_confirmatory_cell(
     tmp_path: Path,
 ) -> None:
