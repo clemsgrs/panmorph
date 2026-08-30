@@ -66,7 +66,7 @@ PROFILES = {
         (0, 10, "all"), (0,), 50, 9, 3,
     ),
     "full": E1Profile(
-        "full", True, ("COAD", "STAD", "UCEC"), None,
+        "full", True, ("COAD", "UCEC", "STAD"), None,
         (0, 3, 5, 10, 25, 40, "all"), tuple(range(20)), 2_000, 999, 50,
     ),
 }
@@ -340,7 +340,7 @@ def _execution_specs(profile: E1Profile, cohorts: Mapping[str, Cohort]):
     else:
         bases = []
         for target_name in sorted(profile.cohorts):
-            foreign = tuple(cohorts[name] for name in sorted(profile.cohorts) if name != target_name)
+            foreign = tuple(cohorts[name] for name in cohorts if name != target_name)
             bases.extend((source, cohorts[target_name], (source,)) for source in foreign)
             bases.append((_pool_cohorts(foreign), cohorts[target_name], foreign))
     specs = []
@@ -391,9 +391,19 @@ def _run_cells(out: Path, profile: E1Profile, cohorts: Mapping[str, Cohort], wor
             missing.append((index, spec, path))
         else:
             results[index] = cached
+    phase1_endpoints = [
+        item for item in missing if item[1][3] == 0 and item[1][5] == "warm"
+    ]
+    worker_cells = [item for item in missing if item not in phase1_endpoints]
+    for index, spec, path in phase1_endpoints:
+        result = _execute_cell(spec)
+        _save_cell(path, result)
+        results[index] = result
     with parallel_config(backend="loky", inner_max_num_threads=1):
-        computed = Parallel(n_jobs=workers)(delayed(_execute_cell)(item[1]) for item in missing)
-    for (index, _, path), result in zip(missing, computed):
+        computed = Parallel(n_jobs=workers)(
+            delayed(_execute_cell)(item[1]) for item in worker_cells
+        )
+    for (index, _, path), result in zip(worker_cells, computed):
         _save_cell(path, result)
         results[index] = result
     ordered = [results[index] for index in range(len(specs))]

@@ -22,6 +22,7 @@ from panmorph.e1 import (
     trace_paired_cell,
     validate_phase1_anchors,
 )
+from panmorph.probe import fit_predict
 
 
 def synthetic_cohorts() -> tuple[Cohort, Cohort]:
@@ -188,6 +189,32 @@ def test_zero_endpoint_uses_foreign_only_warm_and_unfitted_cold_baseline() -> No
     assert not [record for record in result.draws if record.origin == "target"]
 
 
+def test_warm_zero_predictions_exactly_reuse_the_phase1_zero_shot_fit() -> None:
+    source, target = synthetic_cohorts()
+    dimensions = np.arange(1, 1_281)[None, :]
+    source_rows = np.arange(1, source.n + 1)[:, None]
+    target_rows = np.arange(1, target.n + 1)[:, None]
+    source = replace(
+        source,
+        X=(np.cos(source_rows * dimensions / 41) + source.y[:, None] * 0.02)
+        .astype(np.float32),
+    )
+    target = replace(
+        target,
+        X=(np.sin(target_rows * dimensions / 37) + target.y[:, None] * 0.02)
+        .astype(np.float32),
+    )
+    expected = fit_predict(source.X, source.y, target.X)
+
+    result = trace_paired_cell(
+        source, target, k=0, draw_seed=None, arms=("warm",)
+    )
+    actual_by_case = {record.case_id: record.score for record in result.predictions}
+    actual = np.asarray([actual_by_case[str(case_id)] for case_id in target.case_ids])
+
+    assert np.array_equal(actual, expected)
+
+
 def test_all_endpoint_uses_every_eligible_target_training_case() -> None:
     source, target = synthetic_cohorts()
 
@@ -262,6 +289,35 @@ def test_pooled_base_audit_rows_preserve_each_source_cohort(
     ]
 
     assert {row.cohort for row in pooled_source_rows} == {"B", "C"}
+
+
+def test_pooled_base_preserves_registered_source_row_order() -> None:
+    _, target = synthetic_cohorts()
+    cohorts = {
+        "A": replace(target, name="A"),
+        "C": replace(
+            target,
+            name="C",
+            case_ids=np.asarray([f"C{i:02d}" for i in range(50)]),
+        ),
+        "B": replace(
+            target,
+            name="B",
+            case_ids=np.asarray([f"B{i:02d}" for i in range(50)]),
+        ),
+    }
+
+    result = run_e1_matrix(cohorts, rungs=(0,), draw_ids=())
+    pooled_fold = [
+        row
+        for row in result.draws
+        if row.source == "B+C"
+        and row.target == "A"
+        and row.fold == 0
+        and row.origin == "source"
+    ]
+
+    assert [row.cohort for row in pooled_fold] == ["C"] * 50 + ["B"] * 50
 
 
 def test_matrix_stores_each_source_independent_cold_result_once(

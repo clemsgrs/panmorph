@@ -12,6 +12,7 @@ from panmorph.e1_runner import (
     run_e1_bundle,
     validate_e1_bundle,
 )
+from panmorph.probe import fit_predict
 
 
 def _quick_cohorts() -> dict[str, Cohort]:
@@ -196,3 +197,44 @@ def test_parallel_worker_count_does_not_change_result_tables(tmp_path: Path) -> 
         "e1_summaries.csv", "e1_equivalence.csv", "e1_confirmatory_null.csv",
     ):
         assert (serial / name).read_bytes() == (parallel / name).read_bytes()
+
+
+def test_parallel_bundle_warm_zero_exactly_matches_phase1_scoring(
+    tmp_path: Path,
+) -> None:
+    cohorts = _quick_cohorts()
+    dimensions = np.arange(1, 1_281)[None, :]
+    expanded = {}
+    for cohort_index, (name, cohort) in enumerate(cohorts.items(), start=1):
+        rows = np.arange(1, cohort.n + 1)[:, None]
+        expanded[name] = Cohort(
+            name=cohort.name,
+            X=(
+                np.sin(rows * dimensions / (37 + cohort_index))
+                + cohort.y[:, None] * 0.02
+            ).astype(np.float32),
+            y=cohort.y,
+            sites=cohort.sites,
+            case_ids=cohort.case_ids,
+        )
+    expected = fit_predict(
+        expanded["COAD"].X, expanded["COAD"].y, expanded["STAD"].X
+    )
+
+    out = tmp_path / "bundle"
+    run_e1_bundle(out, profile="quick", cohorts=expanded, workers=2)
+    with (out / "e1_predictions.csv").open(newline="") as handle:
+        rows = [
+            row
+            for row in csv.DictReader(handle)
+            if row["source"] == "COAD"
+            and row["target"] == "STAD"
+            and row["arm"] == "warm"
+            and row["k"] == "0"
+        ]
+    actual_by_case = {row["case_id"]: float(row["score"]) for row in rows}
+    actual = np.asarray(
+        [actual_by_case[str(case_id)] for case_id in expanded["STAD"].case_ids]
+    )
+
+    assert np.array_equal(actual, expected)

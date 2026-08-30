@@ -846,6 +846,11 @@ def trace_paired_cell(
     target_index = {str(case_id): index for index, case_id in enumerate(target.case_ids)}
     draws: list[DrawRecord] = []
     predictions: list[PredictionRecord] = []
+    warm_zero_scores = (
+        fit_predict(source.X, source.y, target.X)
+        if k == 0 and "warm" in arms
+        else None
+    )
 
     folds = GroupKFold(n_splits=5).split(target.X, target.y, target.sites)
     for fold, (_, test_indices) in enumerate(folds):
@@ -905,6 +910,8 @@ def trace_paired_cell(
             scores = (
                 np.full(len(test_indices), 0.5)
                 if arm == "cold" and k == 0
+                else warm_zero_scores[test_indices]
+                if arm == "warm" and k == 0
                 else fit_predict(training_X, training_y, target.X[test_indices])
             )
             predictions.extend(
@@ -993,7 +1000,7 @@ def run_e1_matrix(
     for target_name in sorted(cohorts):
         target = cohorts[target_name]
         foreign = tuple(
-            cohorts[name] for name in sorted(cohorts) if name != target_name
+            cohorts[name] for name in cohorts if name != target_name
         )
         bases = (
             *((cohort, (cohort,)) for cohort in foreign),
