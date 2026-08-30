@@ -112,6 +112,17 @@ flag, derives local-positive equivalence from the equal-weight isotonic cold cur
 explicit censoring at `all`, and runs only the single-source COAD→STAD `k=10` test with
 999 coherent COAD-label permutations and the plus-one empirical p-value.
 
+The downstream **budget-matched swap** keeps total assay counts fixed at 50, 100,
+or 200 while replacing COAD cases with STAD cases in ten-percentage-point steps.
+Each organ portion is sampled without replacement at its full-cohort prevalence;
+stratified orderings are reused within each fold and draw, so every portion is a
+nested prefix. The same complete site-grouped STAD OOF cohort and fixed logistic
+probe are used throughout. This analysis is exploratory: raw pooled OOF AUC is
+primary, rank AUC is an annotation, intervals use 2,000 patient bootstraps, and no
+permutation or confirmatory claim is made. Conditional average COAD-case
+equivalence is always reported with its budget and mixture, including negative,
+undefined target-only, and right-censored values.
+
 **RQ2 (secondary): does a stronger model change the picture?**
 Try a newer foundation model (e.g. PRISM2) or a tile encoder with a trainable MIL
 aggregator (needs tile-level feature extraction).
@@ -151,6 +162,8 @@ python experiments/run_site_probe.py     # site-decodability diagnostic
 python experiments/run_e1.py --profile quick  # functional check; NON-REPORTABLE
 python experiments/run_e1.py --profile full   # registered, reportable E1 bundle
 python experiments/run_e1.py --migrate-v1     # normalize a complete v1 bundle without recomputation
+python experiments/run_swap.py                # downstream exploratory COAD→STAD budget swap
+python experiments/run_swap.py --validate-only  # validate completed E1+swap artifacts
 python -m pytest                         # deterministic synthetic test suite
 ```
 
@@ -165,3 +178,6 @@ in `e1_folds.csv`, loaded case metadata once in `e1_cohort_cases.csv`, and sourc
 composition once in `e1_source_bases.csv`. Together with cell-keyed predictions,
 these plain CSV relations reconstruct each warm and cold training membership
 exactly without the repeated rows used by bundle v1.
+The swap runner enriches that completed bundle with auditable draw, prediction,
+AUC, summary, target-reference, and equivalence tables plus PNG/PDF composition
+and equivalence figures.
