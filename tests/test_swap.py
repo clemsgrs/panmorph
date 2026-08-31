@@ -96,6 +96,14 @@ def test_swap_cell_evaluates_the_complete_site_grouped_target_oof_cohort(swap_tr
     assert len({row.fold for row in result.predictions}) == 5
 
 
+def test_swap_cell_records_its_source_and_target_direction(swap_trace) -> None:
+    result, _ = swap_trace
+
+    assert {(row.source, row.target) for row in result.draws} == {("COAD", "STAD")}
+    assert {(row.source, row.target) for row in result.predictions} == {("COAD", "STAD")}
+    assert (result.auc.source, result.auc.target) == ("COAD", "STAD")
+
+
 def test_swap_cell_reports_raw_pooled_oof_auc(swap_trace) -> None:
     result, _ = swap_trace
 

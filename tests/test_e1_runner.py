@@ -94,6 +94,7 @@ def test_quick_runner_emits_complete_non_reportable_bundle(tmp_path: Path) -> No
     with (out / "e1_source_bases.csv").open(newline="") as handle:
         assert list(csv.DictReader(handle)) == [
             {"source": "COAD", "target": "STAD", "cohort": "COAD"},
+            {"source": "STAD", "target": "COAD", "cohort": "STAD"},
         ]
     with (out / "e1_confirmatory_null.csv").open(newline="") as handle:
         assert len(tuple(csv.DictReader(handle))) == 9
