@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from panmorph.data import Cohort
-from panmorph.e1_runner import run_e1_bundle
+from panmorph.few_label_runner import run_few_label_bundle
 from panmorph.swap import SwapAucRecord, SwapPredictionRecord
 from panmorph.swap_runner import (
     estimate_swap_cells,
@@ -42,7 +42,7 @@ def _rows(path: Path) -> list[dict[str, str]]:
 def swap_bundle(tmp_path_factory: pytest.TempPathFactory) -> Path:
     out = tmp_path_factory.mktemp("swap") / "bundle"
     cohorts = _cohorts()
-    run_e1_bundle(out, profile="quick", cohorts=cohorts, workers=1)
+    run_few_label_bundle(out, profile="quick", cohorts=cohorts, workers=1)
     run_swap_bundle(
         out,
         cohorts=cohorts,
@@ -60,7 +60,7 @@ def test_swap_runner_records_exploratory_configuration(swap_bundle: Path) -> Non
     manifest = json.loads((swap_bundle / "manifest.json").read_text())
 
     assert manifest["downstream"]["swap"] == {
-        "schema_version": "panmorph.swap.bundle/v2",
+        "schema_version": "panmorph.swap.bundle/v3",
         "status": "complete",
         "directions": [
             {"source": "COAD", "target": "STAD"},
@@ -101,16 +101,16 @@ def test_swap_runner_preserves_undefined_target_only_equivalence(swap_bundle: Pa
 
 def test_swap_runner_records_the_monotone_target_reference(swap_bundle: Path) -> None:
     assert _rows(swap_bundle / "swap_reference.csv") == [
-        {"source": "COAD", "target": "STAD", "cases": "0.0", "origin": "e1", "raw_auc": "0.5", "monotone_auc": "0.5"},
+        {"source": "COAD", "target": "STAD", "cases": "0.0", "origin": "few-label", "raw_auc": "0.5", "monotone_auc": "0.5"},
         {"source": "COAD", "target": "STAD", "cases": "10.0", "origin": "swap", "raw_auc": "1.0", "monotone_auc": "1.0"},
         {"source": "COAD", "target": "STAD", "cases": "20.0", "origin": "swap", "raw_auc": "1.0", "monotone_auc": "1.0"},
-        {"source": "COAD", "target": "STAD", "cases": "40.0", "origin": "e1", "raw_auc": "1.0", "monotone_auc": "1.0"},
-        {"source": "COAD", "target": "STAD", "cases": "80.0", "origin": "e1", "raw_auc": "1.0", "monotone_auc": "1.0"},
-        {"source": "STAD", "target": "COAD", "cases": "0.0", "origin": "e1", "raw_auc": "0.5", "monotone_auc": "0.5"},
+        {"source": "COAD", "target": "STAD", "cases": "40.0", "origin": "few-label", "raw_auc": "1.0", "monotone_auc": "1.0"},
+        {"source": "COAD", "target": "STAD", "cases": "80.0", "origin": "few-label", "raw_auc": "1.0", "monotone_auc": "1.0"},
+        {"source": "STAD", "target": "COAD", "cases": "0.0", "origin": "few-label", "raw_auc": "0.5", "monotone_auc": "0.5"},
         {"source": "STAD", "target": "COAD", "cases": "10.0", "origin": "swap", "raw_auc": "1.0", "monotone_auc": "1.0"},
         {"source": "STAD", "target": "COAD", "cases": "20.0", "origin": "swap", "raw_auc": "1.0", "monotone_auc": "1.0"},
-        {"source": "STAD", "target": "COAD", "cases": "40.0", "origin": "e1", "raw_auc": "1.0", "monotone_auc": "1.0"},
-        {"source": "STAD", "target": "COAD", "cases": "80.0", "origin": "e1", "raw_auc": "1.0", "monotone_auc": "1.0"},
+        {"source": "STAD", "target": "COAD", "cases": "40.0", "origin": "few-label", "raw_auc": "1.0", "monotone_auc": "1.0"},
+        {"source": "STAD", "target": "COAD", "cases": "80.0", "origin": "few-label", "raw_auc": "1.0", "monotone_auc": "1.0"},
     ]
 
 

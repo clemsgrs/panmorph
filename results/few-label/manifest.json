@@ -129,7 +129,7 @@
       ],
       "exploratory": true,
       "permutations": 0,
-      "schema_version": "panmorph.swap.bundle/v2",
+      "schema_version": "panmorph.swap.bundle/v3",
       "status": "complete",
       "target_shares": [
         0,
@@ -175,7 +175,7 @@
     "threads_per_worker": 1,
     "workers": 8
   },
-  "schema_version": "panmorph.e1.bundle/v2",
+  "schema_version": "panmorph.few-label.bundle/v1",
   "splitter": {
     "folds": 5,
     "groups": "tissue_source_site",

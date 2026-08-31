@@ -1,15 +1,15 @@
-"""Semantic specification for the E1 result figures."""
+"""Semantic specification for the few-label result figures."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Iterable, Literal
 
-from .e1 import Base, Rung
+from .few_label import Base, Rung
 
 
 @dataclass(frozen=True)
-class E1PlotCell:
-    """One reported E1 rung, independent of any plotting library."""
+class FewLabelPlotCell:
+    """One reported few-label rung, independent of any plotting library."""
 
     source: str
     target: str
@@ -24,7 +24,7 @@ class E1PlotCell:
 
 
 @dataclass(frozen=True)
-class E1EquivalenceMark:
+class FewLabelEquivalenceMark:
     """Foreign-only value expressed as local target-positive cases."""
 
     source: str
@@ -39,7 +39,7 @@ class E1EquivalenceMark:
 
 
 @dataclass(frozen=True)
-class E1PlotPanel:
+class FewLabelPlotPanel:
     """One source-to-target facet in the publication figure."""
 
     row: int
@@ -48,44 +48,26 @@ class E1PlotPanel:
     target: str
     base: Base
     gi_direction: bool
-    cells: tuple[E1PlotCell, ...]
-    equivalence: E1EquivalenceMark | None
+    cells: tuple[FewLabelPlotCell, ...]
+    equivalence: FewLabelEquivalenceMark | None
 
     @property
-    def phase1_anchor(self) -> tuple[int, float] | None:
-        cell = next((cell for cell in self.cells if cell.k == 0), None)
-        return None if cell is None else (0, cell.warm[0])
-
-    @property
-    def local_comparison_cells(self) -> tuple[E1PlotCell, ...]:
+    def local_comparison_cells(self) -> tuple[FewLabelPlotCell, ...]:
         """Cells where both arms use the same local training cases."""
         return tuple(cell for cell in self.cells if cell.k != 0)
-
-    @property
-    def confirmatory_mark(
-        self,
-    ) -> tuple[int, float, float, float, float] | None:
-        cell = next((cell for cell in self.cells if cell.confirmatory), None)
-        if cell is None or not isinstance(cell.k, int) or cell.permutation_p is None:
-            return None
-        return (cell.k, *cell.lift, cell.permutation_p)
 
     @property
     def local_ceiling(self) -> tuple[Literal["all"], float] | None:
         cell = next((cell for cell in self.cells if cell.k == "all"), None)
         return None if cell is None else ("all", cell.cold[0])
 
-    @property
-    def rank_sensitive(self) -> bool:
-        return any(cell.rank_diverged for cell in self.cells)
-
 
 @dataclass(frozen=True)
-class E1PlotSpec:
+class FewLabelPlotSpec:
     """Complete stable semantics consumed by the Matplotlib renderer."""
 
     reportable: bool
-    panels: tuple[E1PlotPanel, ...]
+    panels: tuple[FewLabelPlotPanel, ...]
 
 
 _FULL_MATRIX_LAYOUT: tuple[tuple[str, str, Base], ...] = (
@@ -105,14 +87,14 @@ def _rung_order(k: Rung) -> int:
     return (0, 3, 5, 10, 25, 40, "all").index(k)
 
 
-def build_e1_plot_spec(
-    cells: Iterable[E1PlotCell],
-    equivalences: Iterable[E1EquivalenceMark],
+def build_few_label_plot_spec(
+    cells: Iterable[FewLabelPlotCell],
+    equivalences: Iterable[FewLabelEquivalenceMark],
     *,
     reportable: bool,
-) -> E1PlotSpec:
-    """Arrange E1 estimates into stable, unrelated-series-safe facets."""
-    grouped: dict[tuple[str, str, Base], list[E1PlotCell]] = {}
+) -> FewLabelPlotSpec:
+    """Arrange few-label estimates into stable, unrelated-series-safe facets."""
+    grouped: dict[tuple[str, str, Base], list[FewLabelPlotCell]] = {}
     for cell in cells:
         grouped.setdefault((cell.source, cell.target, cell.base), []).append(cell)
     marks = {
@@ -122,7 +104,7 @@ def build_e1_plot_spec(
     extras = sorted(set(grouped) - set(registered))
     ordered = registered + extras
     panels = tuple(
-        E1PlotPanel(
+        FewLabelPlotPanel(
             row=index // 3,
             column=index % 3,
             source=source,
@@ -134,4 +116,4 @@ def build_e1_plot_spec(
         )
         for index, (source, target, base) in enumerate(ordered)
     )
-    return E1PlotSpec(reportable=reportable, panels=panels)
+    return FewLabelPlotSpec(reportable=reportable, panels=panels)

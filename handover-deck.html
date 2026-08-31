@@ -204,7 +204,7 @@
   <p>MSI testing needs a lab assay. Predicting it directly from routine H&amp;E slides would be cheaper and faster.
   But for many organs, we have very few labeled cases to train on.</p>
   <p><strong>The hope:</strong> borrow training data from other organs where labels are plentiful.</p>
-  <p><strong>The catch:</strong> an early pilot seemed to confirm the hope — until we noticed that adding foreign organs also multiplied the training data 20-fold. More data helps any model. That proves nothing about organs.</p>
+  <p><strong>The catch:</strong> an early pilot seemed to confirm the hope — until we noticed that adding other organs also multiplied the training data 20-fold. More data helps any model. That proves nothing about organs.</p>
   <div class="big-claim">So the real question became: is there genuine shared tumor morphology across organs — or just more data and hidden shortcuts?</div>
 </div></section>
 
@@ -281,14 +281,14 @@
 <!-- 7 · The value question -->
 <section class="slide" id="s7"><div class="slide-inner">
   <div class="eyebrow"><span class="num">07</span><span>Next · the value question</span></div>
-  <h2>What is a foreign organ worth?</h2>
+  <h2>What is another organ's data worth?</h2>
   <p>Picture a hospital that wants a stomach MSI model but can only afford to assay a handful of its own cases.
   Two ways to start:</p>
   <p><strong style="color:var(--series-warm)">Warm start</strong> — begin from the colon-trained model, add the few local cases.<br>
   <strong style="color:var(--series-cold)">Cold start</strong> — train from scratch on the local cases alone.</p>
   <p>The experiment sweeps the number of local cases and compares the two curves. We expect:</p>
   <figure style="margin:1.6rem 0 0; background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:1.2rem 1rem .8rem; box-shadow:var(--shadow); overflow-x:auto;">
-    <svg viewBox="0 0 560 290" role="img" aria-label="Expected result: the warm-start curve begins high where the cold-start curve begins at chance; the gap between them is the value of the foreign organ." style="width:100%; min-width:480px; display:block; font-family:'IBM Plex Mono',monospace;">
+    <svg viewBox="0 0 560 290" role="img" aria-label="Expected result: the warm-start curve begins high where the cold-start curve begins at chance; the gap between them is the value of the other organ's data." style="width:100%; min-width:480px; display:block; font-family:'IBM Plex Mono',monospace;">
       <!-- axes -->
       <line x1="60" y1="250" x2="530" y2="250" stroke="var(--line)" stroke-width="1.5"/>
       <line x1="60" y1="40" x2="60" y2="250" stroke="var(--line)" stroke-width="1.5"/>
@@ -313,7 +313,7 @@
     </svg>
     <figcaption class="footnote" style="margin-top:.6rem; text-align:center;">Sketch of the expected curves — not measured data yet.</figcaption>
   </figure>
-  <p style="margin-top:1.4rem">The gap between the curves <strong>is</strong> the value of the foreign organ — expressed in the most practical unit there is: <em>local labeled cases saved</em>. The experiment (E1) is fully specified, ready to build.</p>
+  <p style="margin-top:1.4rem">The gap between the curves shows the value of the other organ's data as local cases are added.</p>
 </div></section>
 
 <!-- 8 · Stronger models -->
@@ -336,7 +336,7 @@
   <div class="table-scroll"><table>
     <tr><td>Repo (code, docs, results)</td><td class="mono">/data/pathology/projects/clement/code/panmorph</td></tr>
     <tr><td>Start reading here</td><td class="mono">README.md</td></tr>
-    <tr><td>Full plan for Phase 2</td><td>GitHub issue <span class="mono">panmorph#1</span></td></tr>
+    <tr><td>Few-label analysis plan</td><td>GitHub issue <span class="mono">panmorph#1</span></td></tr>
     <tr><td>Raw data</td><td class="mono">/data/pathology/projects/clement/mutation-prediction/</td></tr>
   </table></div>
   <p style="margin-top:1.2rem">Reproduce the main result in one command:</p>

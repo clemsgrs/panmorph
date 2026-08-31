@@ -4,24 +4,24 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import panmorph.e1 as e1_module
+import panmorph.few_label as few_label_module
 from joblib import parallel_config
 
-from experiments.run_e1 import read_prediction_records, write_registered_inference
+from experiments.run_few_label import read_prediction_records, write_registered_inference
 from panmorph.data import Cohort
-from panmorph.e1 import (
+from panmorph.few_label import (
     BOOTSTRAP_REPLICATES,
     CONFIRMATORY_CELL,
     ConfirmatoryResult,
-    E1Inference,
+    FewLabelInference,
     PERMUTATION_COUNT,
     PredictionRecord,
     AucRecord,
-    E1_DRAW_IDS,
+    FEW_LABEL_DRAW_IDS,
     TraceResult,
     empirical_superiority_p,
-    estimate_e1_cell,
-    estimate_e1_matrix,
+    estimate_few_label_cell,
+    estimate_few_label_matrix,
     is_confirmatory_cell,
     local_positive_equivalence,
     run_confirmatory_test,
@@ -49,7 +49,7 @@ def test_registered_bootstrap_schedule_is_stratified_and_keyed() -> None:
 
 
 def test_stored_prediction_reader_restores_the_issue_six_schema(tmp_path: Path) -> None:
-    path = tmp_path / "e1_predictions.csv"
+    path = tmp_path / "few_label_predictions.csv"
     path.write_text(
         "draw_seed,k,fold,held_out_sites,arm,source,target,case_id,label,score\n"
         '7,10,2,"(\'A\', \'B\')",warm,COAD,STAD,P01,1,0.75\n'
@@ -92,14 +92,14 @@ def _cell_predictions() -> tuple[PredictionRecord, ...]:
             label=label,
             score=score,
         )
-        for draw in E1_DRAW_IDS
+        for draw in FEW_LABEL_DRAW_IDS
         for arm in ("cold", "warm")
         for index, (label, score) in enumerate(zip(labels, scores[(draw % 2, arm)]))
     )
 
 
 def test_cell_estimate_pairs_patients_and_fixed_draws_for_raw_auc_intervals() -> None:
-    estimate = estimate_e1_cell(
+    estimate = estimate_few_label_cell(
         _cell_predictions(), "SOURCE", "TARGET", 10, seed=23
     )
 
@@ -124,11 +124,11 @@ def test_cell_estimate_pairs_patients_and_fixed_draws_for_raw_auc_intervals() ->
 
 def test_cell_estimate_rejects_an_incomplete_draw_schedule() -> None:
     incomplete = tuple(
-        record for record in _cell_predictions() if record.draw_seed != E1_DRAW_IDS[-1]
+        record for record in _cell_predictions() if record.draw_seed != FEW_LABEL_DRAW_IDS[-1]
     )
 
     with pytest.raises(ValueError, match="complete fixed draw schedule"):
-        estimate_e1_cell(incomplete, "SOURCE", "TARGET", 10)
+        estimate_few_label_cell(incomplete, "SOURCE", "TARGET", 10)
 
 
 def test_equivalence_uses_equal_weight_isotonic_curve_and_first_linear_crossing() -> None:
@@ -251,7 +251,7 @@ def test_confirmatory_null_reuses_one_source_shuffle_across_all_draws(
             if arm == "warm"
             else (0.1, 0.8, 0.2, 0.9)[index],
         )
-        for draw in E1_DRAW_IDS
+        for draw in FEW_LABEL_DRAW_IDS
         for arm in ("warm", "cold")
         for index, label in enumerate(labels)
     )
@@ -286,7 +286,7 @@ def test_confirmatory_null_reuses_one_source_shuffle_across_all_draws(
             (AucRecord(draw_seed, k, "warm", "COAD", "STAD", auc, auc, 0, False),),
         )
 
-    monkeypatch.setattr(e1_module, "trace_paired_cell", fake_trace)
+    monkeypatch.setattr(few_label_module, "trace_paired_cell", fake_trace)
 
     serial = run_confirmatory_test(source, target, observed, seed=41, n_jobs=1)
 
@@ -294,7 +294,7 @@ def test_confirmatory_null_reuses_one_source_shuffle_across_all_draws(
     assert len(serial.null_lifts) == 999
     for start in range(0, len(calls), 20):
         block = calls[start : start + 20]
-        assert tuple(draw for draw, _ in block) == E1_DRAW_IDS
+        assert tuple(draw for draw, _ in block) == FEW_LABEL_DRAW_IDS
         assert len({shuffled for _, shuffled in block}) == 1
 
     calls.clear()
@@ -328,7 +328,7 @@ def test_confirmatory_test_uses_the_configured_draw_schedule(
     )
 
     monkeypatch.setattr(
-        e1_module,
+        few_label_module,
         "trace_paired_cell",
         lambda *_args, **_kwargs: TraceResult(
             (), (), (AucRecord(7, 10, "warm", "COAD", "STAD", 0.5, 0.5, 0, False),)
@@ -346,7 +346,7 @@ def test_confirmatory_test_uses_the_configured_draw_schedule(
 def test_inference_writer_assigns_a_p_value_only_to_the_confirmatory_cell(
     tmp_path: Path,
 ) -> None:
-    base = estimate_e1_cell(_cell_predictions(), "SOURCE", "TARGET", 10, seed=23)
+    base = estimate_few_label_cell(_cell_predictions(), "SOURCE", "TARGET", 10, seed=23)
     confirmatory_cell = replace(
         base,
         source="COAD",
@@ -362,20 +362,20 @@ def test_inference_writer_assigns_a_p_value_only_to_the_confirmatory_cell(
     confirmatory = ConfirmatoryResult(0.5, 0.01, True, 999, np.zeros(999))
 
     write_registered_inference(
-        E1Inference((confirmatory_cell, exploratory_cell), ()), confirmatory, tmp_path
+        FewLabelInference((confirmatory_cell, exploratory_cell), ()), confirmatory, tmp_path
     )
 
-    with (tmp_path / "e1_estimates.csv").open(newline="") as handle:
+    with (tmp_path / "few_label_estimates.csv").open(newline="") as handle:
         rows = tuple(csv.DictReader(handle))
     assert [row["permutation_p"] for row in rows] == ["0.01", ""]
-    with (tmp_path / "e1_permutation_null.csv").open(newline="") as handle:
+    with (tmp_path / "few_label_permutation_null.csv").open(newline="") as handle:
         assert len(tuple(csv.DictReader(handle))) == 999
 
 
 def test_matrix_inference_derives_equivalence_from_stored_predictions() -> None:
     labels = np.asarray([0] * 5 + [1] * 15)
     predictions = []
-    for k, draws in ((0, (None,)), (10, E1_DRAW_IDS), ("all", (None,))):
+    for k, draws in ((0, (None,)), (10, FEW_LABEL_DRAW_IDS), ("all", (None,))):
         for draw in draws:
             for arm, source in (("warm", "COAD"), ("cold", "target-only")):
                 for index, label in enumerate(labels):
@@ -398,7 +398,7 @@ def test_matrix_inference_derives_equivalence_from_stored_predictions() -> None:
                         )
                     )
 
-    inference = estimate_e1_matrix(tuple(predictions), {"COAD": 100}, seed=13)
+    inference = estimate_few_label_matrix(tuple(predictions), {"COAD": 100}, seed=13)
 
     assert len(inference.cells) == 3
     assert sum(cell.confirmatory for cell in inference.cells) == 1

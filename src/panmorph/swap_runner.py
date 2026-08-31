@@ -17,7 +17,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 from .data import Cohort, load_cohort
-from .e1 import (
+from .few_label import (
     BOOTSTRAP_REPLICATES,
     CensoredInterval,
     IntervalEstimate,
@@ -26,12 +26,12 @@ from .e1 import (
     _bootstrap_auc,
     _ordered_draw_scores,
     _percentile_ranks,
-    estimate_e1_cell,
+    estimate_few_label_cell,
     rank_auc_diverged,
     stratified_bootstrap_indices,
     summarize_predictions,
 )
-from .e1_runner import (
+from .few_label_runner import (
     COHORT_CASE_FIELDS,
     DEFAULT_WORKERS,
     FOLD_FIELDS,
@@ -41,7 +41,7 @@ from .e1_runner import (
     _read_csv,
     _write_csv,
     _write_json,
-    validate_e1_bundle,
+    validate_few_label_bundle,
 )
 from .swap import (
     SWAP_BUDGETS,
@@ -55,13 +55,13 @@ from .swap import (
     build_target_reference,
     conditional_equivalence_interval,
     conditional_source_case_equivalence,
-    e1_case_coordinate,
+    few_label_case_coordinate,
     mixture_case_counts,
     prevalence_matched_counts,
     trace_swap_cell,
 )
 
-SWAP_SCHEMA_VERSION = "panmorph.swap.bundle/v2"
+SWAP_SCHEMA_VERSION = "panmorph.swap.bundle/v3"
 SWAP_DIRECTIONS = (("COAD", "STAD"), ("STAD", "COAD"))
 SWAP_ARTIFACTS = (
     "swap_draws.csv", "swap_predictions.csv", "swap_aucs.csv",
@@ -211,7 +211,7 @@ def _all_case_coordinate(
         == ("target-only", target, "all", "cold")
     ]
     if not rows:
-        raise ValueError(f"completed E1 must include the {target} cold all endpoint")
+        raise ValueError(f"completed few-label must include the {target} cold all endpoint")
     return float(np.mean([
         len(rows) - sum(row.fold == fold for row in rows)
         for fold in sorted({row.fold for row in rows})
@@ -219,25 +219,25 @@ def _all_case_coordinate(
 
 
 def _reference_and_equivalence(
-    e1_predictions: tuple[PredictionRecord, ...],
+    few_label_predictions: tuple[PredictionRecord, ...],
     estimates: tuple[SwapCellEstimate, ...],
     *,
     source: str,
     target: str,
     target_prevalence: float,
-    e1_rungs: tuple[Rung, ...],
+    few_label_rungs: tuple[Rung, ...],
     draw_ids: tuple[int, ...],
     n_bootstraps: int,
 ) -> tuple[
     tuple[TargetReferencePoint, ...], np.ndarray,
     tuple[SwapEquivalenceEstimate, ...],
 ]:
-    e1_cells = {
-        rung: estimate_e1_cell(
-            e1_predictions, source, target, rung, draw_ids=draw_ids,
+    few_label_cells = {
+        rung: estimate_few_label_cell(
+            few_label_predictions, source, target, rung, draw_ids=draw_ids,
             n_bootstraps=n_bootstraps,
         )
-        for rung in e1_rungs
+        for rung in few_label_rungs
     }
     direction_estimates = tuple(
         cell for cell in estimates
@@ -247,19 +247,19 @@ def _reference_and_equivalence(
         cell.budget: cell for cell in direction_estimates if cell.target_share == 100
     }
     points = build_target_reference(
-        e1_cold={rung: cell.cold.point for rung, cell in e1_cells.items()},
+        few_label_cold={rung: cell.cold.point for rung, cell in few_label_cells.items()},
         target_prevalence=target_prevalence,
-        all_case_coordinate=_all_case_coordinate(e1_predictions, target),
+        all_case_coordinate=_all_case_coordinate(few_label_predictions, target),
         swap_target_only={budget: cell.raw.point for budget, cell in target_only.items()},
     )
     bootstrap_by_key: dict[tuple[float, str], np.ndarray] = {}
-    for rung, cell in e1_cells.items():
+    for rung, cell in few_label_cells.items():
         cases = (
-            _all_case_coordinate(e1_predictions, target)
+            _all_case_coordinate(few_label_predictions, target)
             if rung == "all"
-            else e1_case_coordinate(rung, target_prevalence)
+            else few_label_case_coordinate(rung, target_prevalence)
         )
-        bootstrap_by_key[(cases, "e1")] = cell.bootstrap_cold
+        bootstrap_by_key[(cases, "few-label")] = cell.bootstrap_cold
     for budget, cell in target_only.items():
         bootstrap_by_key[(float(budget), "swap")] = cell.bootstrap_raw
     point_curve = {point.cases: point.auc for point in points}
@@ -558,10 +558,10 @@ def rebuild_swap_figures(out: Path) -> None:
         )
         for row in equivalence_rows
     )
-    e1_rows = _read_csv(out / "e1_summaries.csv", SUMMARY_FIELDS)
+    few_label_rows = _read_csv(out / "few_label_summaries.csv", SUMMARY_FIELDS)
     zero_shot = {
         (row["source"], row["target"]): float(row["warm_auc"])
-        for row in e1_rows if row["k"] == "0"
+        for row in few_label_rows if row["k"] == "0"
     }
     _render_swap_figures(out, estimates, equivalences, zero_shot)
 
@@ -577,8 +577,8 @@ def run_swap_bundle(
     n_bootstraps: int = BOOTSTRAP_REPLICATES,
     workers: int = DEFAULT_WORKERS,
 ) -> None:
-    """Add directional exploratory swap records to a completed E1 bundle."""
-    validate_e1_bundle(out, require_complete=True)
+    """Add directional exploratory swap records to a completed few-label bundle."""
+    validate_few_label_bundle(out, require_complete=True)
     if (
         not directions or len(set(directions)) != len(directions)
         or any(source == target for source, target in directions)
@@ -592,9 +592,9 @@ def run_swap_bundle(
     manifest = json.loads(manifest_path.read_text())
     for name in cohort_names:
         if name not in loaded or name not in manifest["cohorts"]:
-            raise ValueError(f"swap cohort {name} is absent from the completed E1 bundle")
+            raise ValueError(f"swap cohort {name} is absent from the completed few-label bundle")
         if _cohort_identity(loaded[name]) != manifest["cohorts"][name]:
-            raise ValueError(f"swap {name} data does not match the completed E1 bundle")
+            raise ValueError(f"swap {name} data does not match the completed few-label bundle")
     configuration = {
         "schema_version": SWAP_SCHEMA_VERSION, "status": "running",
         "directions": [
@@ -628,21 +628,21 @@ def run_swap_bundle(
         result.predictions, result.aucs, draw_ids=draw_ids,
         n_bootstraps=n_bootstraps,
     )
-    e1_predictions = _bundle_prediction_records(out)
-    e1_rungs = tuple(
+    few_label_predictions = _bundle_prediction_records(out)
+    few_label_rungs = tuple(
         "all" if rung == "all" else int(rung)
         for rung in manifest["configuration"]["rungs"]
     )
     references = []
     equivalences = []
-    e1_draw_ids = tuple(
+    few_label_draw_ids = tuple(
         int(draw) for draw in manifest["configuration"]["draw_ids"]
     )
     for source, target in directions:
         points, monotone, direction_equivalence = _reference_and_equivalence(
-            e1_predictions, estimates, source=source, target=target,
-            target_prevalence=loaded[target].prevalence, e1_rungs=e1_rungs,
-            draw_ids=e1_draw_ids, n_bootstraps=n_bootstraps,
+            few_label_predictions, estimates, source=source, target=target,
+            target_prevalence=loaded[target].prevalence, few_label_rungs=few_label_rungs,
+            draw_ids=few_label_draw_ids, n_bootstraps=n_bootstraps,
         )
         references.append((source, target, points, monotone))
         equivalences.extend(direction_equivalence)
@@ -750,15 +750,15 @@ def _validate_derived_swap_tables(
         ):
             raise ValueError("swap summary table is not reproducible from predictions")
 
-    e1_predictions = _bundle_prediction_records(out)
-    e1_rungs = tuple(
+    few_label_predictions = _bundle_prediction_records(out)
+    few_label_rungs = tuple(
         "all" if rung == "all" else int(rung)
         for rung in manifest["configuration"]["rungs"]
     )
     directions = tuple(
         (row["source"], row["target"]) for row in config["directions"]
     )
-    e1_draw_ids = tuple(
+    few_label_draw_ids = tuple(
         int(value) for value in manifest["configuration"]["draw_ids"]
     )
     expected_references = []
@@ -766,9 +766,9 @@ def _validate_derived_swap_tables(
     for source, target in directions:
         identity = manifest["cohorts"][target]
         points, monotone, equivalences = _reference_and_equivalence(
-            e1_predictions, estimates, source=source, target=target,
+            few_label_predictions, estimates, source=source, target=target,
             target_prevalence=(int(identity["positives"]) / int(identity["cases"])),
-            e1_rungs=e1_rungs, draw_ids=e1_draw_ids,
+            few_label_rungs=few_label_rungs, draw_ids=few_label_draw_ids,
             n_bootstraps=int(config["bootstrap_replicates"]),
         )
         expected_references.extend(
@@ -811,7 +811,7 @@ def _validate_derived_swap_tables(
 
 def _validate_swap_bundle(out: Path, *, validate_parent: bool) -> None:
     if validate_parent:
-        validate_e1_bundle(out, require_complete=True)
+        validate_few_label_bundle(out, require_complete=True)
     manifest = json.loads((out / "manifest.json").read_text())
     config = manifest.get("downstream", {}).get("swap")
     if not config or config.get("status") != "complete":
@@ -841,8 +841,8 @@ def _validate_swap_bundle(out: Path, *, validate_parent: bool) -> None:
     summaries = _read_csv(out / "swap_summaries.csv", SWAP_SUMMARY_FIELDS)
     reference = _read_csv(out / "swap_reference.csv", SWAP_REFERENCE_FIELDS)
     equivalence = _read_csv(out / "swap_equivalence.csv", SWAP_EQUIVALENCE_FIELDS)
-    cohort_rows = _read_csv(out / "e1_cohort_cases.csv", COHORT_CASE_FIELDS)
-    fold_rows = _read_csv(out / "e1_folds.csv", FOLD_FIELDS)
+    cohort_rows = _read_csv(out / "few_label_cohort_cases.csv", COHORT_CASE_FIELDS)
+    fold_rows = _read_csv(out / "few_label_folds.csv", FOLD_FIELDS)
     expected = {
         (source, target, str(budget), str(share), str(draw))
         for source, target in directions
@@ -897,7 +897,7 @@ def _validate_swap_bundle(out: Path, *, validate_parent: bool) -> None:
                 or metadata[1] not in held_out
                 or not np.isfinite(float(row["score"]))
             ):
-                raise ValueError("swap predictions violate the E1 target fold audit")
+                raise ValueError("swap predictions violate the few-label target fold audit")
     by_draw_fold: dict[
         tuple[str, str, str, str, str, str], list[dict[str, str]]
     ] = defaultdict(list)
@@ -974,5 +974,5 @@ def _validate_swap_bundle(out: Path, *, validate_parent: bool) -> None:
 
 
 def validate_swap_bundle(out: Path) -> None:
-    """Reject incomplete or internally inconsistent E1+swap artifacts."""
+    """Reject incomplete or internally inconsistent few-label+swap artifacts."""
     _validate_swap_bundle(out, validate_parent=True)
