@@ -1,4 +1,4 @@
-"""Auditable, resumable execution boundary for the registered E1 experiment."""
+"""Auditable, resumable execution boundary for the registered few-label experiment."""
 from __future__ import annotations
 
 import ast
@@ -21,11 +21,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 from .data import Cohort, MSI_COHORTS, load_cohort
-from .e1 import (
+from .few_label import (
     AucRecord,
     ConfirmatoryResult,
     DrawRecord,
-    E1Inference,
+    FewLabelInference,
     PredictionRecord,
     Rung,
     TraceResult,
@@ -35,28 +35,28 @@ from .e1 import (
     confirmatory_observed,
     empirical_superiority_p,
     evaluate_confirmatory_null,
-    estimate_e1_matrix,
+    estimate_few_label_matrix,
     preflight_rungs,
     sample_rung,
     source_label_permutations,
     summarize_predictions,
     trace_paired_cell,
-    validate_phase1_anchors,
+    validate_zero_shot_anchors,
 )
-from .e1_plot import (
-    E1EquivalenceMark,
-    E1PlotCell,
-    E1PlotSpec,
-    build_e1_plot_spec,
+from .few_label_plot import (
+    FewLabelEquivalenceMark,
+    FewLabelPlotCell,
+    FewLabelPlotSpec,
+    build_few_label_plot_spec,
 )
 
-BUNDLE_SCHEMA_VERSION = "panmorph.e1.bundle/v2"
+BUNDLE_SCHEMA_VERSION = "panmorph.few-label.bundle/v1"
 DEFAULT_WORKERS = 8
 ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass(frozen=True)
-class E1Profile:
+class FewLabelProfile:
     name: Literal["quick", "full"]
     reportable: bool
     cohorts: tuple[str, ...]
@@ -69,12 +69,12 @@ class E1Profile:
 
 
 PROFILES = {
-    "quick": E1Profile(
+    "quick": FewLabelProfile(
         "quick", False, ("COAD", "STAD"),
         (("COAD", "STAD"), ("STAD", "COAD")),
         (0, 10, "all"), (0,), 50, 9, 3,
     ),
-    "full": E1Profile(
+    "full": FewLabelProfile(
         "full", True, ("COAD", "UCEC", "STAD"), None,
         (0, 3, 5, 10, 25, 40, "all"), tuple(range(20)), 2_000, 999, 50,
     ),
@@ -110,10 +110,10 @@ EQUIVALENCE_FIELDS = (
 )
 NULL_FIELDS = ("permutation", "null_mean_lift")
 REQUIRED_ARTIFACTS = (
-    "manifest.json", "e1_draws.csv", "e1_folds.csv", "e1_cohort_cases.csv",
-    "e1_source_bases.csv", "e1_predictions.csv", "e1_aucs.csv",
-    "e1_summaries.csv", "e1_equivalence.csv", "e1_confirmatory_null.csv",
-    "e1_value.png", "e1_value.pdf", "e1_lift.png", "e1_lift.pdf",
+    "manifest.json", "few_label_draws.csv", "few_label_folds.csv", "few_label_cohort_cases.csv",
+    "few_label_source_bases.csv", "few_label_predictions.csv", "few_label_aucs.csv",
+    "few_label_summaries.csv", "few_label_equivalence.csv", "few_label_confirmatory_null.csv",
+    "few_label_value.png", "few_label_value.pdf", "few_label_lift.png", "few_label_lift.pdf",
 )
 
 
@@ -126,7 +126,7 @@ def _sha256(parts: Iterable[bytes]) -> str:
 
 def _code_identity() -> dict[str, str]:
     paths = tuple(sorted((ROOT / "src/panmorph").glob("*.py"))) + (
-        ROOT / "experiments/run_e1.py",
+        ROOT / "experiments/run_few_label.py",
     )
     try:
         commit = subprocess.run(
@@ -159,7 +159,7 @@ def _cohort_identity(cohort: Cohort) -> dict[str, object]:
     }
 
 
-def _manifest(profile: E1Profile, cohorts: Mapping[str, Cohort], workers: int) -> dict:
+def _manifest(profile: FewLabelProfile, cohorts: Mapping[str, Cohort], workers: int) -> dict:
     feature_hashes = {
         name: MSI_COHORTS[name][2].parent.name
         for name in profile.cohorts if name in MSI_COHORTS
@@ -261,7 +261,7 @@ def _prediction_record(row: Mapping[str, str]) -> PredictionRecord:
 def _bundle_prediction_records(out: Path) -> tuple[PredictionRecord, ...]:
     folds = {
         (row["target"], int(row["fold"])): tuple(ast.literal_eval(row["held_out_sites"]))
-        for row in _read_csv(out / "e1_folds.csv", FOLD_FIELDS)
+        for row in _read_csv(out / "few_label_folds.csv", FOLD_FIELDS)
     }
     return tuple(
         PredictionRecord(
@@ -269,7 +269,7 @@ def _bundle_prediction_records(out: Path) -> tuple[PredictionRecord, ...]:
             folds[(row["target"], int(row["fold"]))], row["arm"], row["source"],
             row["target"], row["case_id"], int(row["label"]), float(row["score"]),
         )
-        for row in _read_csv(out / "e1_predictions.csv", BUNDLE_PREDICTION_FIELDS)
+        for row in _read_csv(out / "few_label_predictions.csv", BUNDLE_PREDICTION_FIELDS)
     )
 
 
@@ -381,7 +381,7 @@ def _save_cell(path: Path, result: TraceResult) -> None:
     _write_csv(path / "aucs.csv", auc_fields, (asdict(row) for row in result.aucs))
 
 
-def _execution_specs(profile: E1Profile, cohorts: Mapping[str, Cohort]):
+def _execution_specs(profile: FewLabelProfile, cohorts: Mapping[str, Cohort]):
     if profile.pairs is not None:
         bases = [(cohorts[source], cohorts[target], (cohorts[source],)) for source, target in profile.pairs]
     else:
@@ -416,7 +416,7 @@ def _execute_cell(spec) -> TraceResult:
     return _restore_pooled_provenance(result, members) if len(members) > 1 else result
 
 
-def _run_cells(out: Path, profile: E1Profile, cohorts: Mapping[str, Cohort], workers: int) -> TraceResult:
+def _run_cells(out: Path, profile: FewLabelProfile, cohorts: Mapping[str, Cohort], workers: int) -> TraceResult:
     checkpoint_root = out / "checkpoints" / "cells"
     checkpoint_root.mkdir(parents=True, exist_ok=True)
     results: dict[int, TraceResult] = {}
@@ -438,13 +438,13 @@ def _run_cells(out: Path, profile: E1Profile, cohorts: Mapping[str, Cohort], wor
             missing.append((index, spec, path))
         else:
             results[index] = cached
-    def is_phase1_endpoint(item) -> bool:
+    def is_zero_shot_endpoint(item) -> bool:
         _, (_, _, _, k, _, arm), _ = item
         return k == 0 and arm == "warm"
 
-    phase1_endpoints = [item for item in missing if is_phase1_endpoint(item)]
-    worker_cells = [item for item in missing if item not in phase1_endpoints]
-    for index, spec, path in phase1_endpoints:
+    zero_shot_endpoints = [item for item in missing if is_zero_shot_endpoint(item)]
+    worker_cells = [item for item in missing if item not in zero_shot_endpoints]
+    for index, spec, path in zero_shot_endpoints:
         result = _execute_cell(spec)
         _save_cell(path, result)
         results[index] = result
@@ -514,7 +514,7 @@ def _write_raw_tables(
                 "target": row.target, "k": row.k, "draw_seed": row.draw_seed,
                 "fold": row.fold, "case_id": row.case_id,
             }
-    _write_csv(out / "e1_draws.csv", BUNDLE_DRAW_FIELDS, local_draws.values())
+    _write_csv(out / "few_label_draws.csv", BUNDLE_DRAW_FIELDS, local_draws.values())
     folds = {}
     for row in result.predictions:
         key = (row.target, row.fold)
@@ -522,8 +522,8 @@ def _write_raw_tables(
             "target": row.target, "fold": row.fold,
             "held_out_sites": row.held_out_sites,
         }
-    _write_csv(out / "e1_folds.csv", FOLD_FIELDS, folds.values())
-    _write_csv(out / "e1_cohort_cases.csv", COHORT_CASE_FIELDS, (
+    _write_csv(out / "few_label_folds.csv", FOLD_FIELDS, folds.values())
+    _write_csv(out / "few_label_cohort_cases.csv", COHORT_CASE_FIELDS, (
         {"cohort": cohort.name, "case_id": case_id, "label": int(label), "site": site}
         for cohort in cohorts.values()
         for case_id, label, site in zip(cohort.case_ids, cohort.y, cohort.sites)
@@ -534,127 +534,23 @@ def _write_raw_tables(
             bases[(row.source, row.target, row.cohort)] = {
                 "source": row.source, "target": row.target, "cohort": row.cohort,
             }
-    _write_csv(out / "e1_source_bases.csv", SOURCE_BASE_FIELDS, bases.values())
-    _write_csv(out / "e1_predictions.csv", BUNDLE_PREDICTION_FIELDS, (
+    _write_csv(out / "few_label_source_bases.csv", SOURCE_BASE_FIELDS, bases.values())
+    _write_csv(out / "few_label_predictions.csv", BUNDLE_PREDICTION_FIELDS, (
         {name: getattr(row, name) for name in BUNDLE_PREDICTION_FIELDS}
         for row in result.predictions
     ))
 
 
-def migrate_e1_bundle_v1_to_v2(out: Path) -> Path:
-    """Replace an expanded v1 audit with its deterministic normalized v2 form."""
-    manifest_path = out / "manifest.json"
-    if not manifest_path.is_file():
-        raise ValueError("missing bundle artifact: manifest.json")
-    manifest = json.loads(manifest_path.read_text())
-    if manifest.get("schema_version") == BUNDLE_SCHEMA_VERSION:
-        return out
-    if manifest.get("schema_version") != "panmorph.e1.bundle/v1":
-        raise ValueError("unsupported E1 bundle schema version")
-    if manifest.get("status") != "complete":
-        raise ValueError("v1 migration requires a complete bundle")
-    draws = _iter_csv(out / "e1_draws.csv", DRAW_FIELDS)
-    prediction_path = out / "e1_predictions.csv"
-
-    local_draws = {}
-    folds = {}
-    cohort_cases = {}
-    source_case_order: dict[str, list[tuple[str, str]]] = {}
-    source_case_seen: dict[str, set[tuple[str, str]]] = {}
-    source_bases = {}
-    for row in draws:
-        fold_key = (row["target"], row["fold"])
-        held_out_sites = row["held_out_sites"]
-        if fold_key in folds and folds[fold_key]["held_out_sites"] != held_out_sites:
-            raise ValueError("v1 fold audit is inconsistent")
-        folds[fold_key] = {
-            "target": row["target"], "fold": row["fold"],
-            "held_out_sites": held_out_sites,
-        }
-        case_key = (row["cohort"], row["case_id"])
-        case = {
-            "cohort": row["cohort"], "case_id": row["case_id"],
-            "label": row["label"], "site": row["site"],
-        }
-        if case_key in cohort_cases and cohort_cases[case_key] != case:
-            raise ValueError("v1 cohort-case audit is inconsistent")
-        cohort_cases[case_key] = case
-        if row["origin"] == "target":
-            key = (row["target"], row["k"], row["draw_seed"], row["fold"], row["case_id"])
-            local_draws[key] = {name: row[name] for name in BUNDLE_DRAW_FIELDS}
-        elif row["origin"] == "source":
-            key = (row["source"], row["target"], row["cohort"])
-            source_bases[key] = {name: row[name] for name in SOURCE_BASE_FIELDS}
-            seen = source_case_seen.setdefault(row["cohort"], set())
-            if case_key not in seen:
-                source_case_order.setdefault(row["cohort"], []).append(case_key)
-                seen.add(case_key)
-    for row in _iter_csv(prediction_path, PREDICTION_FIELDS):
-        fold_key = (row["target"], row["fold"])
-        held_out_sites = row["held_out_sites"]
-        if fold_key in folds and folds[fold_key]["held_out_sites"] != held_out_sites:
-            raise ValueError("v1 fold audit is inconsistent")
-        folds[fold_key] = {
-            "target": row["target"], "fold": row["fold"],
-            "held_out_sites": held_out_sites,
-        }
-    for cohort, identity in manifest["cohorts"].items():
-        cases = sorted(
-            (row for (name, _), row in cohort_cases.items() if name == cohort),
-            key=lambda row: row["case_id"],
-        )
-        if (
-            len(cases) != int(identity["cases"])
-            or sum(int(row["label"]) for row in cases) != int(identity["positives"])
-        ):
-            raise ValueError("v1 cohort-case audit is incomplete")
-        identity["case_sha256"] = _sha256(
-            f'{row["case_id"]}\0{int(row["label"])}\0{row["site"]}\n'.encode()
-            for row in cases
-        )
-    manifest["schema_version"] = BUNDLE_SCHEMA_VERSION
-    with tempfile.TemporaryDirectory(prefix="panmorph-e1-migrate-", dir=out.parent) as temporary:
-        staged = Path(temporary)
-        _write_csv(staged / "e1_draws.csv", BUNDLE_DRAW_FIELDS, local_draws.values())
-        _write_csv(staged / "e1_folds.csv", FOLD_FIELDS, folds.values())
-        ordered_cases = (
-            cohort_cases[key]
-            for cohort in manifest["cohorts"]
-            for key in (
-                source_case_order.get(cohort, [])
-                + [
-                    candidate for candidate in cohort_cases
-                    if candidate[0] == cohort
-                    and candidate not in source_case_seen.get(cohort, set())
-                ]
-            )
-        )
-        _write_csv(staged / "e1_cohort_cases.csv", COHORT_CASE_FIELDS, ordered_cases)
-        _write_csv(staged / "e1_source_bases.csv", SOURCE_BASE_FIELDS, source_bases.values())
-        _write_csv(staged / "e1_predictions.csv", BUNDLE_PREDICTION_FIELDS, (
-            {name: row[name] for name in BUNDLE_PREDICTION_FIELDS}
-            for row in _iter_csv(prediction_path, PREDICTION_FIELDS)
-        ))
-        _write_json(staged / "manifest.json", manifest)
-        for name in (
-            "e1_draws.csv", "e1_folds.csv", "e1_cohort_cases.csv",
-            "e1_source_bases.csv", "e1_predictions.csv",
-        ):
-            (staged / name).replace(out / name)
-        (staged / "manifest.json").replace(manifest_path)
-    return out
-
-
 def _write_derived_tables(
     out: Path,
     predictions: tuple[PredictionRecord, ...],
-    inference: E1Inference,
+    inference: FewLabelInference,
     confirmatory: ConfirmatoryResult,
 ) -> None:
     aucs = summarize_predictions(predictions)
-    _write_csv(out / "e1_aucs.csv", AUC_FIELDS, (
+    _write_csv(out / "few_label_aucs.csv", AUC_FIELDS, (
         {
-            "experiment": "E1", "source": row.source, "target": row.target,
+            "experiment": "few-label", "source": row.source, "target": row.target,
             "base": _base(row), "arm": row.arm, "k": row.k,
             "draw_seed": row.draw_seed, "auc": row.raw_auc,
             "rank_auc": row.rank_auc, "rank_gap": row.rank_gap,
@@ -662,7 +558,7 @@ def _write_derived_tables(
         }
         for row in aucs
     ))
-    _write_csv(out / "e1_summaries.csv", SUMMARY_FIELDS, (
+    _write_csv(out / "few_label_summaries.csv", SUMMARY_FIELDS, (
         {
             "source": cell.source, "target": cell.target, "base": cell.base, "k": cell.k,
             "n_draws": cell.n_draws, "warm_auc": cell.warm.point,
@@ -677,7 +573,7 @@ def _write_derived_tables(
         }
         for cell in inference.cells
     ))
-    _write_csv(out / "e1_equivalence.csv", EQUIVALENCE_FIELDS, (
+    _write_csv(out / "few_label_equivalence.csv", EQUIVALENCE_FIELDS, (
         {
             "source": cell.source, "target": cell.target, "base": cell.base,
             "local_positive_equivalence": cell.local_positive.point.value,
@@ -695,13 +591,13 @@ def _write_derived_tables(
         }
         for cell in inference.equivalences
     ))
-    _write_csv(out / "e1_confirmatory_null.csv", NULL_FIELDS, (
+    _write_csv(out / "few_label_confirmatory_null.csv", NULL_FIELDS, (
         {"permutation": index, "null_mean_lift": value}
         for index, value in enumerate(confirmatory.null_lifts)
     ))
 
 
-def _derive_reports(out: Path) -> tuple[tuple[PredictionRecord, ...], E1Inference, ConfirmatoryResult]:
+def _derive_reports(out: Path) -> tuple[tuple[PredictionRecord, ...], FewLabelInference, ConfirmatoryResult]:
     manifest = json.loads((out / "manifest.json").read_text())
     predictions = _bundle_prediction_records(out)
     draw_ids = tuple(int(value) for value in manifest["configuration"]["draw_ids"])
@@ -710,13 +606,13 @@ def _derive_reports(out: Path) -> tuple[tuple[PredictionRecord, ...], E1Inferenc
         source: sum(int(manifest["cohorts"][member]["cases"]) for member in source.split("+"))
         for source in source_names
     }
-    inference = estimate_e1_matrix(
+    inference = estimate_few_label_matrix(
         predictions,
         source_counts,
         draw_ids=draw_ids,
         n_bootstraps=int(manifest["configuration"]["bootstrap_replicates"]),
     )
-    null_rows = _read_csv(out / "e1_confirmatory_null.csv", NULL_FIELDS)
+    null_rows = _read_csv(out / "few_label_confirmatory_null.csv", NULL_FIELDS)
     null = np.asarray([float(row["null_mean_lift"]) for row in null_rows])
     observed, _ = confirmatory_observed(predictions, draw_ids)
     p_value = empirical_superiority_p(observed, null)
@@ -726,7 +622,7 @@ def _derive_reports(out: Path) -> tuple[tuple[PredictionRecord, ...], E1Inferenc
     return predictions, inference, confirmatory
 
 
-def rebuild_e1_reports(out: Path) -> None:
+def rebuild_few_label_reports(out: Path) -> None:
     """Rebuild all derived CSV reports from stored predictions and null values."""
     predictions, inference, confirmatory = _derive_reports(out)
     _write_derived_tables(out, predictions, inference, confirmatory)
@@ -734,31 +630,31 @@ def rebuild_e1_reports(out: Path) -> None:
 
 def _verify_report_reproducibility(out: Path) -> None:
     predictions, inference, confirmatory = _derive_reports(out)
-    with tempfile.TemporaryDirectory(prefix="panmorph-e1-validate-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="panmorph-few-label-validate-") as temporary:
         expected = Path(temporary)
         _write_derived_tables(expected, predictions, inference, confirmatory)
         for name in (
-            "e1_aucs.csv", "e1_summaries.csv", "e1_equivalence.csv",
-            "e1_confirmatory_null.csv",
+            "few_label_aucs.csv", "few_label_summaries.csv", "few_label_equivalence.csv",
+            "few_label_confirmatory_null.csv",
         ):
             if (out / name).read_bytes() != (expected / name).read_bytes():
                 raise ValueError(f"stored {name} is not reproducible from bundle inputs")
 
 
-def _validate_e1_bundle(
+def _validate_few_label_bundle(
     out: Path,
     *,
     require_reportable: bool = False,
     require_complete: bool = False,
     verify_reports: bool = True,
 ) -> None:
-    """Validate public schemas and material joins in a completed E1 bundle."""
+    """Validate public schemas and material joins in a completed few-label bundle."""
     manifest_path = out / "manifest.json"
     if not manifest_path.is_file():
         raise ValueError("missing bundle artifact: manifest.json")
     manifest = json.loads(manifest_path.read_text())
     if manifest.get("schema_version") != BUNDLE_SCHEMA_VERSION:
-        raise ValueError("unsupported E1 bundle schema version")
+        raise ValueError("unsupported few-label bundle schema version")
     if require_reportable and manifest.get("reportable") is not True:
         raise ValueError("bundle is not reportable")
     if require_complete and manifest.get("status") != "complete":
@@ -767,15 +663,15 @@ def _validate_e1_bundle(
         missing = [name for name in REQUIRED_ARTIFACTS if not (out / name).is_file()]
         if missing:
             raise ValueError(f"missing completed bundle artifacts: {missing}")
-    draws = _read_csv(out / "e1_draws.csv", BUNDLE_DRAW_FIELDS)
-    folds = _read_csv(out / "e1_folds.csv", FOLD_FIELDS)
-    cohort_cases = _read_csv(out / "e1_cohort_cases.csv", COHORT_CASE_FIELDS)
-    source_bases = _read_csv(out / "e1_source_bases.csv", SOURCE_BASE_FIELDS)
-    predictions = _read_csv(out / "e1_predictions.csv", BUNDLE_PREDICTION_FIELDS)
-    aucs = _read_csv(out / "e1_aucs.csv", AUC_FIELDS)
-    summaries = _read_csv(out / "e1_summaries.csv", SUMMARY_FIELDS)
-    _read_csv(out / "e1_equivalence.csv", EQUIVALENCE_FIELDS)
-    null = _read_csv(out / "e1_confirmatory_null.csv", NULL_FIELDS)
+    draws = _read_csv(out / "few_label_draws.csv", BUNDLE_DRAW_FIELDS)
+    folds = _read_csv(out / "few_label_folds.csv", FOLD_FIELDS)
+    cohort_cases = _read_csv(out / "few_label_cohort_cases.csv", COHORT_CASE_FIELDS)
+    source_bases = _read_csv(out / "few_label_source_bases.csv", SOURCE_BASE_FIELDS)
+    predictions = _read_csv(out / "few_label_predictions.csv", BUNDLE_PREDICTION_FIELDS)
+    aucs = _read_csv(out / "few_label_aucs.csv", AUC_FIELDS)
+    summaries = _read_csv(out / "few_label_summaries.csv", SUMMARY_FIELDS)
+    _read_csv(out / "few_label_equivalence.csv", EQUIVALENCE_FIELDS)
+    null = _read_csv(out / "few_label_confirmatory_null.csv", NULL_FIELDS)
     prediction_keys = {
         (row["source"], row["target"], row["arm"], row["k"], row["draw_seed"])
         for row in predictions
@@ -974,7 +870,7 @@ def _validate_e1_bundle(
         raise ValueError("draw audit table is empty")
     if manifest.get("reportable"):
         with (ROOT / "results/gate_results.csv").open(newline="") as handle:
-            validate_phase1_anchors(
+            validate_zero_shot_anchors(
                 tuple(
                     AucRecord(
                         _optional_int(row["draw_seed"]), _rung(row["k"]), row["arm"],
@@ -990,14 +886,14 @@ def _validate_e1_bundle(
         _verify_report_reproducibility(out)
 
 
-def validate_e1_bundle(
+def validate_few_label_bundle(
     out: Path,
     *,
     require_reportable: bool = False,
     require_complete: bool = False,
 ) -> None:
-    """Validate structure and reproducibility of a completed E1 bundle."""
-    _validate_e1_bundle(
+    """Validate structure and reproducibility of a completed few-label bundle."""
+    _validate_few_label_bundle(
         out,
         require_reportable=require_reportable,
         require_complete=require_complete,
@@ -1005,19 +901,19 @@ def validate_e1_bundle(
     )
 
 
-def render_e1_figures(out: Path, *, validate: bool = True) -> None:
+def render_few_label_figures(out: Path, *, validate: bool = True) -> None:
     """Render value and lift figures using only a validated on-disk bundle."""
     if validate:
-        validate_e1_bundle(out)
+        validate_few_label_bundle(out)
     manifest = json.loads((out / "manifest.json").read_text())
-    rows = _read_csv(out / "e1_summaries.csv", SUMMARY_FIELDS)
-    equivalence_rows = _read_csv(out / "e1_equivalence.csv", EQUIVALENCE_FIELDS)
+    rows = _read_csv(out / "few_label_summaries.csv", SUMMARY_FIELDS)
+    equivalence_rows = _read_csv(out / "few_label_equivalence.csv", EQUIVALENCE_FIELDS)
 
     def optional_float(value: str) -> float | None:
         return None if value == "" else float(value)
 
     cells = tuple(
-        E1PlotCell(
+        FewLabelPlotCell(
             source=row["source"], target=row["target"], base=row["base"],
             k=_rung(row["k"]),
             warm=(float(row["warm_auc"]), float(row["warm_ci_lower"]),
@@ -1033,7 +929,7 @@ def render_e1_figures(out: Path, *, validate: bool = True) -> None:
         for row in rows
     )
     equivalences = tuple(
-        E1EquivalenceMark(
+        FewLabelEquivalenceMark(
             source=row["source"], target=row["target"], base=row["base"],
             point=optional_float(row["local_positive_equivalence"]),
             lower=optional_float(row["local_ci_lower"]),
@@ -1044,23 +940,23 @@ def render_e1_figures(out: Path, *, validate: bool = True) -> None:
         )
         for row in equivalence_rows
     )
-    spec = build_e1_plot_spec(
+    spec = build_few_label_plot_spec(
         cells, equivalences, reportable=bool(manifest["reportable"])
     )
-    _render_e1_plot(spec, out, kind="value")
-    _render_e1_plot(spec, out, kind="lift")
+    _render_few_label_plot(spec, out, kind="value")
+    _render_few_label_plot(spec, out, kind="lift")
 
 
 _RUNG_POSITIONS = {0: 0, 3: 1, 5: 2, 10: 3, 25: 4, 40: 5, "all": 6}
 
 
-def _render_e1_plot(
-    spec: E1PlotSpec,
+def _render_few_label_plot(
+    spec: FewLabelPlotSpec,
     out: Path,
     *,
     kind: Literal["value", "lift"],
 ) -> None:
-    """Render one semantic E1 plot specification without joining unrelated cells."""
+    """Render one semantic few-label plot specification without joining unrelated cells."""
     n_columns = min(3, max(1, len(spec.panels)))
     n_rows = (len(spec.panels) + n_columns - 1) // n_columns
     fig, axes = plt.subplots(
@@ -1157,20 +1053,20 @@ def _render_e1_plot(
     )
     fig.text(0.5, 0.005, footer, ha="center", fontsize=8)
     fig.tight_layout(rect=(0, 0.025, 1, 0.91))
-    stem = f"e1_{kind}"
+    stem = f"few_label_{kind}"
     fig.savefig(out / f"{stem}.png", dpi=180)
     fig.savefig(out / f"{stem}.pdf")
     plt.close(fig)
 
 
-def run_e1_bundle(
+def run_few_label_bundle(
     out: Path,
     *,
     profile: Literal["quick", "full"] = "full",
     cohorts: Mapping[str, Cohort] | None = None,
     workers: int = DEFAULT_WORKERS,
 ) -> Path:
-    """Execute or safely resume E1 and return its validated bundle directory."""
+    """Execute or safely resume few-label and return its validated bundle directory."""
     if workers < 1:
         raise ValueError("workers must be positive")
     selected = PROFILES[profile]
@@ -1190,27 +1086,27 @@ def run_e1_bundle(
     if manifest_path.exists():
         existing = json.loads(manifest_path.read_text())
         if _identity(existing) != _identity(planned):
-            raise ValueError("incompatible E1 partial results: manifest identity differs")
+            raise ValueError("incompatible few-label partial results: manifest identity differs")
     started = time.monotonic()
     _write_json(manifest_path, planned)
     result = _run_cells(out, selected, loaded, workers)
     if selected.reportable:
         with (ROOT / "results/gate_results.csv").open(newline="") as handle:
-            validate_phase1_anchors(result.aucs, tuple(csv.DictReader(handle)))
+            validate_zero_shot_anchors(result.aucs, tuple(csv.DictReader(handle)))
     _write_raw_tables(out, result, loaded)
     confirmatory = _run_permutations(out, selected, loaded, result.predictions, workers)
-    _write_csv(out / "e1_confirmatory_null.csv", NULL_FIELDS, (
+    _write_csv(out / "few_label_confirmatory_null.csv", NULL_FIELDS, (
         {"permutation": index, "null_mean_lift": value}
         for index, value in enumerate(confirmatory.null_lifts)
     ))
-    rebuild_e1_reports(out)
-    validate_e1_bundle(out)
-    render_e1_figures(out, validate=False)
+    rebuild_few_label_reports(out)
+    validate_few_label_bundle(out)
+    render_few_label_figures(out, validate=False)
     completed = dict(planned)
     completed["status"] = "complete"
     completed["elapsed_seconds"] = time.monotonic() - started
     _write_json(manifest_path, completed)
-    _validate_e1_bundle(
+    _validate_few_label_bundle(
         out,
         require_reportable=selected.reportable,
         require_complete=True,

@@ -1,4 +1,4 @@
-"""Directional budget-matched swap experiment on the E1 OOF scaffold."""
+"""Directional budget-matched swap experiment on the few-label OOF scaffold."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -10,7 +10,7 @@ from sklearn.isotonic import IsotonicRegression
 from sklearn.model_selection import GroupKFold
 
 from .data import Cohort
-from .e1 import (
+from .few_label import (
     CensoredInterval,
     PredictionRecord,
     Rung,
@@ -37,8 +37,8 @@ def mixture_case_counts(budget: int, target_share: int) -> tuple[int, int]:
     return budget - n_target, n_target
 
 
-def e1_case_coordinate(positive_cases: int, prevalence: float) -> float:
-    """Convert an E1 positive-count rung to its prevalence-matched assay count."""
+def few_label_case_coordinate(positive_cases: int, prevalence: float) -> float:
+    """Convert an few-label positive-count rung to its prevalence-matched assay count."""
     return float(positive_cases + round(positive_cases * (1 - prevalence) / prevalence))
 
 
@@ -126,13 +126,13 @@ def conditional_equivalence_interval(
 @dataclass(frozen=True)
 class TargetReferencePoint:
     cases: float
-    origin: Literal["e1", "swap"]
+    origin: Literal["few-label", "swap"]
     auc: float
 
 
 def build_target_reference(
     *,
-    e1_cold: Mapping[Rung, float],
+    few_label_cold: Mapping[Rung, float],
     target_prevalence: float,
     all_case_coordinate: float,
     swap_target_only: Mapping[int, float],
@@ -140,15 +140,15 @@ def build_target_reference(
     """Combine all registered target-only observations on a target-case axis."""
     if not 0 < target_prevalence <= 1:
         raise ValueError("target_prevalence must be in (0, 1]")
-    if 0 not in e1_cold or "all" not in e1_cold:
-        raise ValueError("E1 cold points must include zero and all")
+    if 0 not in few_label_cold or "all" not in few_label_cold:
+        raise ValueError("few-label cold points must include zero and all")
     points = []
-    for rung, auc in e1_cold.items():
+    for rung, auc in few_label_cold.items():
         if rung == "all":
             cases = float(all_case_coordinate)
         else:
-            cases = e1_case_coordinate(rung, target_prevalence)
-        points.append(TargetReferencePoint(cases, "e1", float(auc)))
+            cases = few_label_case_coordinate(rung, target_prevalence)
+        points.append(TargetReferencePoint(cases, "few-label", float(auc)))
     points.extend(
         TargetReferencePoint(float(budget), "swap", float(auc))
         for budget, auc in swap_target_only.items()

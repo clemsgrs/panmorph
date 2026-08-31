@@ -8,20 +8,6 @@ laboratory assay; predicting it from routine H&E slides could provide a cheaper 
 tool. The difficulty is that some organs have too few MSI-positive cases to train a
 reliable local model.
 
-## Main findings
-
-- **Colon and stomach transfer in both directions without local target labels.** A model
-  trained on colon reached AUC 0.760 on stomach; a model trained on stomach reached 0.744
-  on colon.
-- **The benefit lasts longer from stomach to colon.** Stomach data still improved the
-  colon model with 40 local MSI-positive cases. Colon data mainly helped the stomach model
-  when only three to five local positives were available.
-- **Endometrial data did not transfer well to the gastrointestinal organs.** Adding it to
-  a useful colon or stomach source could weaken the model.
-
-See the [few-label results](results/e1/README.md) for the figures, uncertainty intervals,
-and limits of these conclusions.
-
 ## Zero-shot transfer
 
 `COAD` is colon cancer, `STAD` is stomach cancer, and `UCEC` is endometrial cancer. Rows
@@ -37,6 +23,19 @@ hospital-held-out benchmarks.
 The colon↔stomach results passed the pre-specified uncertainty and shuffled-label checks.
 The other cross-organ directions did not. Full values are in
 [`results/gate_results.csv`](results/gate_results.csv).
+
+## Few-label transfer
+
+We then added small numbers of labelled patients from the target organ:
+
+- Stomach data still improved the colon model with 40 local MSI-positive cases: AUC was
+  0.804 with stomach data and 0.751 without it.
+- Colon data helped the stomach model mainly with three to five local positives. It also
+  helped the endometrial model at those small sample sizes.
+- Endometrial data added little to the colon or stomach models.
+
+See the [full few-label results](results/few-label/README.md) for the figures, uncertainty
+intervals, and results at every sample size.
 
 ## Data and evaluation
 
@@ -58,16 +57,16 @@ cross-organ signal.
 ## Run
 
 ```bash
-python experiments/run_gate.py                 # zero-shot transfer matrix
-python experiments/run_e1.py --profile quick   # fast smoke test; not reportable
-python experiments/run_e1.py --profile full    # complete few-label analysis
-python experiments/run_site_probe.py           # hospital-site diagnostic
-python -m pytest                                # deterministic test suite
+python experiments/run_gate.py                       # zero-shot transfer matrix
+python experiments/run_few_label.py --profile quick  # fast smoke test; not reportable
+python experiments/run_few_label.py --profile full   # complete few-label analysis
+python experiments/run_site_probe.py                 # hospital-site diagnostic
+python -m pytest                                      # deterministic test suite
 ```
 
 The complete few-label run is resumable and writes a validated result bundle to
-`results/e1/`. Its manifest records the data, model, split, seeds, and inference settings
-needed to identify the run.
+`results/few-label/`. Its manifest records the data, model, split, seeds, and inference
+settings needed to identify the run.
 
 ## Repository layout
 

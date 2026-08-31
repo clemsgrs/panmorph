@@ -175,19 +175,19 @@ def test_conditional_equivalence_interval_preserves_a_censored_upper_bound() -> 
     assert interval.upper_censored
 
 
-def test_target_reference_combines_e1_and_swap_target_only_coordinates() -> None:
+def test_target_reference_combines_few_label_and_swap_target_only_coordinates() -> None:
     points = build_target_reference(
-        e1_cold={0: 0.50, 3: 0.58, 10: 0.68, "all": 0.82},
+        few_label_cold={0: 0.50, 3: 0.58, 10: 0.68, "all": 0.82},
         target_prevalence=0.20,
         all_case_coordinate=120.0,
         swap_target_only={60: 0.72, 100: 0.79},
     )
 
     assert [(point.cases, point.origin, point.auc) for point in points] == [
-        (0.0, "e1", 0.50),
-        (15.0, "e1", 0.58),
-        (50.0, "e1", 0.68),
+        (0.0, "few-label", 0.50),
+        (15.0, "few-label", 0.58),
+        (50.0, "few-label", 0.68),
         (60.0, "swap", 0.72),
         (100.0, "swap", 0.79),
-        (120.0, "e1", 0.82),
+        (120.0, "few-label", 0.82),
     ]

@@ -5,22 +5,22 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from experiments.run_e1 import write_reportable_results
+from experiments.run_few_label import write_reportable_results
 from panmorph.data import Cohort
-from panmorph.e1 import (
+from panmorph.few_label import (
     AucRecord,
     DrawRecord,
-    E1_DRAW_IDS,
-    E1_RUNGS,
+    FEW_LABEL_DRAW_IDS,
+    FEW_LABEL_RUNGS,
     PredictionRecord,
     TraceResult,
     preflight_rungs,
     rank_auc_diverged,
-    run_e1_matrix,
+    run_few_label_matrix,
     sample_rung,
     summarize_predictions,
     trace_paired_cell,
-    validate_phase1_anchors,
+    validate_zero_shot_anchors,
 )
 
 
@@ -118,8 +118,8 @@ def test_preflight_rejects_an_infeasible_numeric_rung_without_clipping() -> None
 
 
 def test_registered_sweep_uses_the_fixed_rungs_and_twenty_draw_ids() -> None:
-    assert E1_RUNGS == (0, 3, 5, 10, 25, 40, "all")
-    assert E1_DRAW_IDS == tuple(range(20))
+    assert FEW_LABEL_RUNGS == (0, 3, 5, 10, 25, 40, "all")
+    assert FEW_LABEL_DRAW_IDS == tuple(range(20))
 
 
 def test_trace_pairs_training_draws_and_covers_every_patient_in_five_site_folds() -> None:
@@ -226,7 +226,7 @@ def matrix_fixture() -> tuple[TraceResult, dict[str, Cohort]]:
             case_ids=np.asarray([f"C{i:02d}" for i in range(50)]),
         ),
     }
-    return run_e1_matrix(cohorts, rungs=(0, 1, "all"), draw_ids=(0, 1)), cohorts
+    return run_few_label_matrix(cohorts, rungs=(0, 1, "all"), draw_ids=(0, 1)), cohorts
 
 
 def test_matrix_runs_every_single_and_pooled_foreign_base(
@@ -280,7 +280,7 @@ def test_pooled_base_preserves_registered_source_row_order() -> None:
         ),
     }
 
-    result = run_e1_matrix(cohorts, rungs=(0,), draw_ids=())
+    result = run_few_label_matrix(cohorts, rungs=(0,), draw_ids=())
     pooled_fold = [
         row
         for row in result.draws
@@ -338,7 +338,7 @@ def test_every_matrix_key_has_exactly_one_complete_pooled_oof_cohort(
         assert len({record.case_id for record in rows}) == cohorts[key[1]].n
 
 
-def _phase1_records() -> tuple[tuple[AucRecord, ...], tuple[dict[str, str], ...]]:
+def _zero_shot_records() -> tuple[tuple[AucRecord, ...], tuple[dict[str, str], ...]]:
     return (
         (
         AucRecord(None, 0, "warm", "B+C", "A", 0.7, 0.7, 0.0, False),
@@ -361,25 +361,25 @@ def _phase1_records() -> tuple[tuple[AucRecord, ...], tuple[dict[str, str], ...]
     )
 
 
-def test_phase1_anchor_tolerance_is_inclusive_at_one_e_minus_six() -> None:
-    endpoint_aucs, phase1_rows = _phase1_records()
-    validate_phase1_anchors(endpoint_aucs, phase1_rows)
+def test_zero_shot_anchor_tolerance_is_inclusive_at_one_e_minus_six() -> None:
+    endpoint_aucs, zero_shot_rows = _zero_shot_records()
+    validate_zero_shot_anchors(endpoint_aucs, zero_shot_rows)
 
 
-def test_phase1_anchor_rejects_a_gap_above_one_e_minus_six() -> None:
-    endpoint_aucs, phase1_rows = _phase1_records()
-    mismatched = (phase1_rows[0] | {"auc": "0.7000011"}, phase1_rows[1])
-    with np.testing.assert_raises_regex(ValueError, "Phase-1 anchor mismatch"):
-        validate_phase1_anchors(endpoint_aucs, mismatched)
+def test_zero_shot_anchor_rejects_a_gap_above_one_e_minus_six() -> None:
+    endpoint_aucs, zero_shot_rows = _zero_shot_records()
+    mismatched = (zero_shot_rows[0] | {"auc": "0.7000011"}, zero_shot_rows[1])
+    with np.testing.assert_raises_regex(ValueError, "zero-shot anchor mismatch"):
+        validate_zero_shot_anchors(endpoint_aucs, mismatched)
 
 
-def test_phase1_anchor_requires_a_committed_counterpart_for_every_endpoint() -> None:
-    endpoint_aucs, phase1_rows = _phase1_records()
-    with np.testing.assert_raises_regex(ValueError, "missing committed Phase-1 counterpart"):
-        validate_phase1_anchors(endpoint_aucs, phase1_rows[:1])
+def test_zero_shot_anchor_requires_a_committed_counterpart_for_every_endpoint() -> None:
+    endpoint_aucs, zero_shot_rows = _zero_shot_records()
+    with np.testing.assert_raises_regex(ValueError, "missing committed zero-shot counterpart"):
+        validate_zero_shot_anchors(endpoint_aucs, zero_shot_rows[:1])
 
 
-def _write_phase1_anchor(path: Path, source: str, target: str, auc: float) -> None:
+def _write_zero_shot_anchor(path: Path, source: str, target: str, auc: float) -> None:
     path.write_text(
         "component,source,target,auc\n"
         f"zeroshot,{source},{target},{auc}\n"
@@ -440,23 +440,23 @@ def report_output(
     tmp_path: Path,
     reportable_result: TraceResult,
 ) -> Path:
-    phase1 = tmp_path / "phase1.csv"
-    _write_phase1_anchor(phase1, "SOURCE", "TARGET", 0.7)
+    zero_shot = tmp_path / "zero_shot.csv"
+    _write_zero_shot_anchor(zero_shot, "SOURCE", "TARGET", 0.7)
     out = tmp_path / "report"
-    write_reportable_results(reportable_result, phase1, out)
+    write_reportable_results(reportable_result, zero_shot, out)
     return out
 
 
 def test_reportable_writer_emits_all_three_tables(report_output: Path) -> None:
     assert {path.name for path in report_output.iterdir()} == {
-        "e1_draws.csv",
-        "e1_predictions.csv",
-        "e1_results.csv",
+        "few_label_draws.csv",
+        "few_label_predictions.csv",
+        "few_label_results.csv",
     }
 
 
 def test_reportable_writer_serializes_the_tidy_result_schema(report_output: Path) -> None:
-    with (report_output / "e1_results.csv").open(newline="") as handle:
+    with (report_output / "few_label_results.csv").open(newline="") as handle:
         result_rows = tuple(csv.DictReader(handle))
     assert tuple(result_rows[0]) == (
         "experiment",
@@ -472,7 +472,7 @@ def test_reportable_writer_serializes_the_tidy_result_schema(report_output: Path
         "rank_diverged",
     )
     assert result_rows[0] == {
-        "experiment": "E1",
+        "experiment": "few-label",
         "source": "SOURCE",
         "target": "TARGET",
         "base": "single",
@@ -489,7 +489,7 @@ def test_reportable_writer_serializes_the_tidy_result_schema(report_output: Path
 def test_reportable_writer_serializes_auditable_training_rows(
     report_output: Path,
 ) -> None:
-    with (report_output / "e1_draws.csv").open(newline="") as handle:
+    with (report_output / "few_label_draws.csv").open(newline="") as handle:
         draw_rows = tuple(csv.DictReader(handle))
 
     assert draw_rows[0] == {
@@ -511,7 +511,7 @@ def test_reportable_writer_serializes_auditable_training_rows(
 def test_reportable_writer_serializes_auditable_prediction_rows(
     report_output: Path,
 ) -> None:
-    with (report_output / "e1_predictions.csv").open(newline="") as handle:
+    with (report_output / "few_label_predictions.csv").open(newline="") as handle:
         prediction_rows = tuple(csv.DictReader(handle))
 
     assert prediction_rows[0] == {
@@ -532,12 +532,12 @@ def test_reportable_writer_creates_no_output_when_an_anchor_fails(
     tmp_path: Path,
     reportable_result: TraceResult,
 ) -> None:
-    phase1 = tmp_path / "phase1.csv"
-    _write_phase1_anchor(phase1, "SOURCE", "TARGET", 0.0)
+    zero_shot = tmp_path / "zero_shot.csv"
+    _write_zero_shot_anchor(zero_shot, "SOURCE", "TARGET", 0.0)
     out = tmp_path / "report"
 
-    with np.testing.assert_raises_regex(ValueError, "Phase-1 anchor mismatch"):
-        write_reportable_results(reportable_result, phase1, out)
+    with np.testing.assert_raises_regex(ValueError, "zero-shot anchor mismatch"):
+        write_reportable_results(reportable_result, zero_shot, out)
 
     assert not out.exists()
 

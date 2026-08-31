@@ -1,4 +1,4 @@
-"""Site-clean paired warm/cold tracer for the phase-2 E1 experiment."""
+"""Site-clean paired warm/cold tracer for the few-label transfer experiment."""
 from __future__ import annotations
 
 import hashlib
@@ -19,8 +19,8 @@ Arm = Literal["warm", "cold"]
 Origin = Literal["source", "target"]
 Base = Literal["single", "pooled"]
 Rung = int | Literal["all"]
-E1_RUNGS: tuple[Rung, ...] = (0, 3, 5, 10, 25, 40, "all")
-E1_DRAW_IDS: tuple[int, ...] = tuple(range(20))
+FEW_LABEL_RUNGS: tuple[Rung, ...] = (0, 3, 5, 10, 25, 40, "all")
+FEW_LABEL_DRAW_IDS: tuple[int, ...] = tuple(range(20))
 BOOTSTRAP_REPLICATES = 2_000
 PERMUTATION_COUNT = 999
 CONFIRMATORY_CELL = ("COAD", "STAD", "single", 10)
@@ -103,7 +103,7 @@ class IntervalEstimate:
 
 @dataclass(frozen=True)
 class CellEstimate:
-    """Registered paired inference for one warm/cold E1 cell."""
+    """Registered paired inference for one warm/cold few-label cell."""
 
     source: str
     target: str
@@ -176,7 +176,7 @@ class EquivalenceCellSummary:
 
 
 @dataclass(frozen=True)
-class E1Inference:
+class FewLabelInference:
     cells: tuple[CellEstimate, ...]
     equivalences: tuple[EquivalenceCellSummary, ...]
 
@@ -305,7 +305,7 @@ def stratified_bootstrap_indices(
 
 
 def is_confirmatory_cell(source: str, target: str, k: Rung) -> bool:
-    """Return whether this is the sole registered confirmatory E1 cell."""
+    """Return whether this is the sole registered confirmatory few-label cell."""
     return (source, target, _source_base(source), k) == CONFIRMATORY_CELL
 
 
@@ -320,7 +320,7 @@ def _source_base(source: str) -> Base:
 def count_source_cases(
     cohorts: Mapping[str, Cohort], sources: Iterable[str]
 ) -> dict[str, int]:
-    """Count source patients for single and pooled E1 bases."""
+    """Count source patients for single and pooled few-label bases."""
     return {
         source: sum(cohorts[name].n for name in _source_members(source))
         for source in sources
@@ -348,7 +348,7 @@ def empirical_superiority_p(observed: float, null: np.ndarray) -> float:
 
 def confirmatory_observed(
     predictions: tuple[PredictionRecord, ...] | list[PredictionRecord],
-    draw_ids: tuple[int, ...] = E1_DRAW_IDS,
+    draw_ids: tuple[int, ...] = FEW_LABEL_DRAW_IDS,
 ) -> tuple[float, dict[int, float]]:
     """Return registered observed mean lift and cold AUCs keyed by draw."""
     warm = summarize_predictions(
@@ -381,7 +381,7 @@ def evaluate_confirmatory_null(
     shuffled_labels: np.ndarray,
     cold_by_draw: Mapping[int, float],
     *,
-    draw_ids: tuple[int, ...] = E1_DRAW_IDS,
+    draw_ids: tuple[int, ...] = FEW_LABEL_DRAW_IDS,
     n_jobs: int = -1,
 ) -> np.ndarray:
     """Evaluate supplied coherent source-label shuffles at the registered cell."""
@@ -414,7 +414,7 @@ def run_confirmatory_test(
     *,
     seed: int = 0,
     n_jobs: int = -1,
-    draw_ids: tuple[int, ...] = E1_DRAW_IDS,
+    draw_ids: tuple[int, ...] = FEW_LABEL_DRAW_IDS,
     n_permutations: int = PERMUTATION_COUNT,
 ) -> ConfirmatoryResult:
     """Run the one registered 999-permutation mean-lift superiority test."""
@@ -457,14 +457,14 @@ def _interval(point: float, bootstrap: np.ndarray) -> IntervalEstimate:
     return IntervalEstimate(point, float(lower), float(upper))
 
 
-def estimate_e1_cell(
+def estimate_few_label_cell(
     predictions: tuple[PredictionRecord, ...] | list[PredictionRecord],
     source: str,
     target: str,
     k: Rung,
     *,
     seed: int = 0,
-    draw_ids: tuple[int, ...] = E1_DRAW_IDS,
+    draw_ids: tuple[int, ...] = FEW_LABEL_DRAW_IDS,
     n_bootstraps: int = BOOTSTRAP_REPLICATES,
 ) -> CellEstimate:
     """Estimate mean arm AUCs and paired lift from stored OOF predictions."""
@@ -703,22 +703,22 @@ def _all_positive_coordinate(
     )
 
 
-def estimate_e1_matrix(
+def estimate_few_label_matrix(
     predictions: tuple[PredictionRecord, ...] | list[PredictionRecord],
     source_case_counts: Mapping[str, int],
     *,
     seed: int = 0,
-    draw_ids: tuple[int, ...] = E1_DRAW_IDS,
+    draw_ids: tuple[int, ...] = FEW_LABEL_DRAW_IDS,
     n_bootstraps: int = BOOTSTRAP_REPLICATES,
-) -> E1Inference:
-    """Turn the complete stored E1 predictions into registered estimates."""
+) -> FewLabelInference:
+    """Turn the complete stored few-label predictions into registered estimates."""
     keys = {
         (record.source, record.target, record.k)
         for record in predictions
         if record.arm == "warm"
     }
     cells = tuple(
-        estimate_e1_cell(
+        estimate_few_label_cell(
             predictions, source, target, k, seed=seed,
             draw_ids=draw_ids, n_bootstraps=n_bootstraps,
         )
@@ -745,7 +745,7 @@ def estimate_e1_matrix(
         equivalences.append(
             EquivalenceCellSummary(source, target, by_rung[0].base, summary)
         )
-    return E1Inference(cells, tuple(equivalences))
+    return FewLabelInference(cells, tuple(equivalences))
 
 
 def _numeric_rung_pool(
@@ -812,7 +812,7 @@ def sample_rung(
 
 def preflight_rungs(
     target: Cohort,
-    rungs: tuple[Rung, ...] = E1_RUNGS,
+    rungs: tuple[Rung, ...] = FEW_LABEL_RUNGS,
 ) -> None:
     """Fail before execution if any numeric rung cannot be drawn in every fold."""
     numeric_rungs = tuple(k for k in rungs if k != "all")
@@ -842,7 +842,7 @@ def trace_paired_cell(
     draw_seed: int | None,
     arms: tuple[Arm, ...] = ("warm", "cold"),
 ) -> TraceResult:
-    """Run one paired warm/cold E1 cell over site-grouped target folds."""
+    """Run one paired warm/cold few-label cell over site-grouped target folds."""
     target_index = {str(case_id): index for index, case_id in enumerate(target.case_ids)}
     draws: list[DrawRecord] = []
     predictions: list[PredictionRecord] = []
@@ -984,14 +984,14 @@ def _restore_pooled_provenance(
     )
 
 
-def run_e1_matrix(
+def run_few_label_matrix(
     cohorts: dict[str, Cohort],
-    rungs: tuple[Rung, ...] = E1_RUNGS,
-    draw_ids: tuple[int, ...] = E1_DRAW_IDS,
+    rungs: tuple[Rung, ...] = FEW_LABEL_RUNGS,
+    draw_ids: tuple[int, ...] = FEW_LABEL_DRAW_IDS,
 ) -> TraceResult:
     """Run every single and pooled foreign base with deduplicated cold arms."""
     if len(cohorts) < 2:
-        raise ValueError("E1 requires at least two cohorts")
+        raise ValueError("few-label requires at least two cohorts")
     for target in cohorts.values():
         preflight_rungs(target, rungs)
 
@@ -1035,12 +1035,12 @@ def _canonical_source(source: str) -> str:
     return "+".join(sorted(source.split("+")))
 
 
-def validate_phase1_anchors(
+def validate_zero_shot_anchors(
     aucs: tuple[AucRecord, ...] | list[AucRecord],
-    phase1_rows: Iterable[Mapping[str, object]],
+    zero_shot_rows: Iterable[Mapping[str, object]],
     tolerance: Decimal = Decimal("0.000001"),
 ) -> None:
-    """Require E1 deterministic endpoints to reproduce committed Phase-1 AUCs."""
+    """Require few-label deterministic endpoints to reproduce committed zero-shot AUCs."""
     actual = {
         (record.arm, record.source, record.target): record.raw_auc
         for record in aucs
@@ -1048,7 +1048,7 @@ def validate_phase1_anchors(
         or (record.arm == "cold" and record.k == "all")
     }
     expected: dict[tuple[Arm, str, str], float] = {}
-    for row in phase1_rows:
+    for row in zero_shot_rows:
         component = str(row["component"])
         target = str(row["target"])
         if component == "zeroshot":
@@ -1060,14 +1060,14 @@ def validate_phase1_anchors(
         expected[key] = float(row["auc"])
 
     for key in actual.keys() - expected.keys():
-        raise ValueError(f"missing committed Phase-1 counterpart for endpoint: {key}")
+        raise ValueError(f"missing committed zero-shot counterpart for endpoint: {key}")
     for key, expected_auc in expected.items():
         if key not in actual:
-            raise ValueError(f"missing Phase-1 anchor endpoint: {key}")
+            raise ValueError(f"missing zero-shot anchor endpoint: {key}")
         gap = abs(Decimal(str(actual[key])) - Decimal(str(expected_auc)))
         if gap > tolerance:
             raise ValueError(
-                "Phase-1 anchor mismatch for "
+                "zero-shot anchor mismatch for "
                 f"{key[0]} {key[1]} -> {key[2]}: "
-                f"E1={actual[key]:.12g}, Phase-1={expected_auc:.12g}, gap={gap}"
+                f"few-label={actual[key]:.12g}, zero-shot={expected_auc:.12g}, gap={gap}"
             )
