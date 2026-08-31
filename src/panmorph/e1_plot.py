@@ -57,6 +57,11 @@ class E1PlotPanel:
         return None if cell is None else (0, cell.warm[0])
 
     @property
+    def local_comparison_cells(self) -> tuple[E1PlotCell, ...]:
+        """Cells where both arms use the same local training cases."""
+        return tuple(cell for cell in self.cells if cell.k != 0)
+
+    @property
     def confirmatory_mark(
         self,
     ) -> tuple[int, float, float, float, float] | None:

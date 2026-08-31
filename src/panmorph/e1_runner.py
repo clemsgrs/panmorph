@@ -1054,22 +1054,6 @@ def render_e1_figures(out: Path, *, validate: bool = True) -> None:
 _RUNG_POSITIONS = {0: 0, 3: 1, 5: 2, 10: 3, 25: 4, 40: 5, "all": 6}
 
 
-def _equivalence_label(mark: E1EquivalenceMark | None) -> str | None:
-    if mark is None:
-        return None
-
-    def number(value: float | None, censored: bool) -> str:
-        if value is None:
-            return "beyond local range"
-        prefix = "≥" if censored else ""
-        return f"{prefix}{value:.1f}"
-
-    point = number(mark.point, mark.point_censored)
-    lower = number(mark.lower, mark.lower_censored)
-    upper = number(mark.upper, mark.upper_censored)
-    return f"Foreign-only ≈ {point} local positives\n95% interval: {lower} to {upper}"
-
-
 def _render_e1_plot(
     spec: E1PlotSpec,
     out: Path,
@@ -1087,116 +1071,91 @@ def _render_e1_plot(
     warm_color = "#0072B2"
     cold_color = "#4D4D4D"
     for panel, ax in zip(spec.panels, flat_axes):
-        x = np.asarray([_RUNG_POSITIONS[cell.k] for cell in panel.cells])
-        phase2 = np.asarray([cell.k != 0 for cell in panel.cells])
-        ax.axvspan(-0.4, 0.4, color="#E8EEF6", alpha=0.8, zorder=0)
-        if panel.rank_sensitive:
-            ax.set_facecolor("#FFF8E7")
+        cells = panel.cells if kind == "value" else panel.local_comparison_cells
+        x = np.asarray([_RUNG_POSITIONS[cell.k] for cell in cells])
+        local = np.asarray([cell.k != 0 for cell in cells])
         if kind == "value":
+            ax.axvspan(-0.4, 0.4, color="#E8EEF6", alpha=0.8, zorder=0)
             for field, color, label in (
-                ("warm", warm_color, "Foreign + same local cases"),
-                ("cold", cold_color, "Same local cases only"),
+                ("warm", warm_color, "Other-organ + local"),
+                ("cold", cold_color, "Local only"),
             ):
-                estimates = np.asarray([getattr(cell, field) for cell in panel.cells])
-                ax.errorbar(
-                    x[~phase2], estimates[~phase2, 0],
-                    yerr=np.vstack((
-                        estimates[~phase2, 0] - estimates[~phase2, 1],
-                        estimates[~phase2, 2] - estimates[~phase2, 0],
-                    )),
-                    fmt="D", color=color, capsize=2, markersize=4,
-                )
+                estimates = np.asarray([getattr(cell, field) for cell in cells])
+                if field == "warm":
+                    ax.errorbar(
+                        x[~local], estimates[~local, 0],
+                        yerr=np.vstack((
+                            estimates[~local, 0] - estimates[~local, 1],
+                            estimates[~local, 2] - estimates[~local, 0],
+                        )),
+                        fmt="D", color=color, capsize=2, markersize=4,
+                    )
                 ax.plot(
-                    x[phase2], estimates[phase2, 0], marker="o", color=color,
+                    x[local], estimates[local, 0], marker="o", color=color,
                     linewidth=1.7, markersize=4, label=label,
                 )
                 ax.fill_between(
-                    x[phase2], estimates[phase2, 1], estimates[phase2, 2],
+                    x[local], estimates[local, 1], estimates[local, 2],
                     color=color, alpha=0.13,
-                )
-            if panel.phase1_anchor is not None:
-                ax.axhline(
-                    panel.phase1_anchor[1], color=warm_color, linestyle="--",
-                    linewidth=0.8, alpha=0.55,
                 )
             if panel.local_ceiling is not None:
                 ax.scatter(
                     [_RUNG_POSITIONS["all"]], [panel.local_ceiling[1]],
                     marker="s", s=32, color=cold_color, zorder=5,
                 )
-            label = _equivalence_label(panel.equivalence)
-            if label:
-                ax.text(
-                    0.98, 0.03, label, transform=ax.transAxes, ha="right",
-                    va="bottom", fontsize=7.5,
-                )
         else:
-            estimates = np.asarray([cell.lift for cell in panel.cells])
+            estimates = np.asarray([cell.lift for cell in cells])
             ax.axhline(0, color="black", linewidth=0.9)
             ax.errorbar(
-                x[~phase2], estimates[~phase2, 0],
+                x, estimates[:, 0],
                 yerr=np.vstack((
-                    estimates[~phase2, 0] - estimates[~phase2, 1],
-                    estimates[~phase2, 2] - estimates[~phase2, 0],
-                )),
-                fmt="D", color=warm_color, capsize=3, markersize=5,
-            )
-            ax.errorbar(
-                x[phase2], estimates[phase2, 0],
-                yerr=np.vstack((
-                    estimates[phase2, 0] - estimates[phase2, 1],
-                    estimates[phase2, 2] - estimates[phase2, 0],
+                    estimates[:, 0] - estimates[:, 1],
+                    estimates[:, 2] - estimates[:, 0],
                 )),
                 fmt="o-", color=warm_color, capsize=3, linewidth=1.5,
                 markersize=4,
             )
-            mark = panel.confirmatory_mark
-            if mark is not None:
-                position = _RUNG_POSITIONS[mark[0]]
-                ax.scatter(
-                    [position], [mark[1]], s=120, facecolors="none",
-                    edgecolors="#D55E00", linewidths=2, zorder=5,
-                )
-                ax.annotate(
-                    f"Confirmatory p={mark[4]:.3f}", (position, mark[1]),
-                    xytext=(5, 10), textcoords="offset points", fontsize=7.5,
-                    color="#A54000",
-                )
         title = f"{panel.source} → {panel.target}"
         if panel.base == "pooled":
             title += "  ·  pooled source"
-        if panel.rank_sensitive:
-            title += "  †"
         ax.set_title(title, fontsize=10, fontweight="bold" if panel.gi_direction else None)
         if panel.gi_direction:
             for spine in ax.spines.values():
                 spine.set_color("#0072B2")
                 spine.set_linewidth(1.5)
-        ax.set_xticks(tuple(_RUNG_POSITIONS.values()), tuple(map(str, _RUNG_POSITIONS)))
+        ticks = tuple(
+            (position, str(k)) for k, position in _RUNG_POSITIONS.items()
+            if kind == "value" or k != 0
+        )
+        ax.set_xticks(
+            tuple(position for position, _ in ticks),
+            tuple(label for _, label in ticks),
+        )
         ax.grid(axis="y", color="0.9", linewidth=0.6)
     for ax in flat_axes[len(spec.panels):]:
         ax.set_visible(False)
     for ax in axes[-1, :]:
         if ax.get_visible():
-            ax.set_xlabel("Local target MSI-positive cases (k)")
+            ax.set_xlabel("Local MSI-positive cases")
     for ax in axes[:, 0]:
         if ax.get_visible():
-            ax.set_ylabel("Raw pooled OOF AUC" if kind == "value" else "AUC added by foreign data")
+            ax.set_ylabel("AUC" if kind == "value" else "AUC gain from other-organ data")
     title = (
-        "How long does foreign-organ signal remain useful as local labels arrive?"
+        "Does other-organ data still help as local labels are added?"
         if kind == "value"
-        else "How much did foreign data add beyond the same local training set?"
+        else "AUC gain from adding other-organ data"
     )
-    status = "REPORTABLE" if spec.reportable else "QUICK — NON-REPORTABLE"
-    fig.suptitle(f"{title}\n{status}", fontsize=15)
+    status = "" if spec.reportable else "\nQuick run — not final"
+    fig.suptitle(f"{title}{status}", fontsize=15)
     if kind == "value" and spec.panels:
         handles, labels = flat_axes[0].get_legend_handles_labels()
         fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.945), ncol=2)
-    fig.text(
-        0.5, 0.005,
-        "Shaded k=0 is the Phase-1 zero-shot anchor. k>0 asks what foreign data adds after the same local cases are available. † raw/rank score sensitivity.",
-        ha="center", fontsize=8,
+    footer = (
+        "At 0 local positives, the blue diamond is zero-shot AUC; no local-only model exists. Bands are 95% intervals."
+        if kind == "value"
+        else "Values above zero favor other-organ + local training. Bars are 95% intervals."
     )
+    fig.text(0.5, 0.005, footer, ha="center", fontsize=8)
     fig.tight_layout(rect=(0, 0.025, 1, 0.91))
     stem = f"e1_{kind}"
     fig.savefig(out / f"{stem}.png", dpi=180)

@@ -1,12 +1,12 @@
 from panmorph.e1_plot import E1EquivalenceMark, E1PlotCell, build_e1_plot_spec
 
 
-def _cell(source: str, target: str, base: str) -> E1PlotCell:
+def _cell(source: str, target: str, base: str, k=0) -> E1PlotCell:
     return E1PlotCell(
         source=source,
         target=target,
         base=base,
-        k=0,
+        k=k,
         warm=(0.75, 0.70, 0.80),
         cold=(0.50, 0.50, 0.50),
         lift=(0.25, 0.20, 0.30),
@@ -49,6 +49,18 @@ def test_full_matrix_facets_keep_both_gi_directions_prominent() -> None:
         (2, 2, "COAD+STAD", "UCEC", "pooled", False),
     )
 
+
+def test_local_comparisons_exclude_the_zero_shot_point() -> None:
+    cells = tuple(
+        _cell("STAD", "COAD", "single", k)
+        for k in (0, 3, 5, 10, 25, 40, "all")
+    )
+
+    panel = build_e1_plot_spec(cells, (), reportable=True).panels[0]
+
+    assert tuple(cell.k for cell in panel.local_comparison_cells) == (
+        3, 5, 10, 25, 40, "all",
+    )
 
 def test_panel_exposes_zero_shot_confirmatory_ceiling_and_equivalence_marks() -> None:
     cells = (
