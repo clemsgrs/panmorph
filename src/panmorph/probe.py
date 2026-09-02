@@ -1,10 +1,13 @@
-"""The frozen-embedding linear probe — pre-registered, fixed hyperparameters.
+"""The frozen-embedding linear probe with pre-registered, fixed hyperparameters.
 
-Decision #6: sklearn logistic regression with fixed HPs and no tuning. This keeps
-the leakage surface minimal (nothing is tuned, so nothing can leak across the
-source/target boundary) and the interpretation parsimonious (a *linear* boundary in
-frozen PRISM space transferring across organs is strong evidence of shared signal).
-The torch linear-probe / MLP ladder comes later, after the gate passes.
+Nothing is tuned, so nothing can leak across the source/target boundary, and the
+interpretation stays parsimonious: a linear boundary in frozen PRISM space that
+transfers across organs is strong evidence of shared signal.
+
+Every fit runs with one BLAS thread. The L-BFGS solver is sensitive to the
+reduction order inside multithreaded BLAS calls, so the same data can give AUCs
+that differ at the 1e-3 level between machines with different core counts. A
+single thread makes every number in the repository reproducible bit for bit.
 """
 from __future__ import annotations
 
@@ -12,6 +15,7 @@ import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
+from threadpoolctl import threadpool_limits
 
 
 def make_probe() -> Pipeline:
@@ -30,4 +34,5 @@ def make_probe() -> Pipeline:
 
 def fit_predict(Xtr: np.ndarray, ytr: np.ndarray, Xte: np.ndarray) -> np.ndarray:
     """Fit a fresh probe on (Xtr, ytr); return P(MSI-high) for Xte."""
-    return make_probe().fit(Xtr, ytr).predict_proba(Xte)[:, 1]
+    with threadpool_limits(limits=1):
+        return make_probe().fit(Xtr, ytr).predict_proba(Xte)[:, 1]

@@ -2,7 +2,7 @@
 
 Each cohort has one 1280-dim PRISM embedding per patient (all of a patient's slides
 already aggregated into a single .pt), so there is no same-patient slide leakage.
-See README.md for the verified inventory.
+The committed label tables under ``data/`` are the verified inventory.
 """
 from __future__ import annotations
 
