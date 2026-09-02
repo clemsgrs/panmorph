@@ -5,6 +5,7 @@ import ast
 import csv
 import hashlib
 import json
+import platform
 import subprocess
 import tempfile
 import time
@@ -15,6 +16,8 @@ from typing import Iterable, Literal, Mapping
 
 import matplotlib
 import numpy as np
+import sklearn
+import threadpoolctl
 from joblib import Parallel, delayed, parallel_config
 
 matplotlib.use("Agg")
@@ -132,6 +135,34 @@ def _code_identity() -> dict[str, str]:
     return {"commit": commit, "sha256": _sha256(path.read_bytes() for path in paths)}
 
 
+def _environment() -> dict[str, object]:
+    """Describe the numerical environment; recorded for diagnosis, not identity."""
+    cpu = "unknown"
+    try:
+        for line in Path("/proc/cpuinfo").read_text().splitlines():
+            if line.startswith("model name"):
+                cpu = line.split(":", 1)[1].strip()
+                break
+    except OSError:
+        pass
+    return {
+        "hostname": platform.node(),
+        "cpu": cpu,
+        "python": platform.python_version(),
+        "numpy": np.__version__,
+        "scikit_learn": sklearn.__version__,
+        "blas": [
+            {
+                "library": info.get("internal_api"),
+                "version": info.get("version"),
+                "architecture": info.get("architecture"),
+            }
+            for info in threadpoolctl.threadpool_info()
+            if info.get("user_api") == "blas"
+        ],
+    }
+
+
 def _cohort_identity(cohort: Cohort) -> dict[str, object]:
     cases = sorted(
         (str(case_id), int(label), str(site))
@@ -186,6 +217,7 @@ def _manifest(profile: FewLabelProfile, cohorts: Mapping[str, Cohort], workers: 
             },
         },
         "resources": {"workers": workers, "threads_per_worker": 1},
+        "environment": _environment(),
         "elapsed_seconds": None,
     }
 
