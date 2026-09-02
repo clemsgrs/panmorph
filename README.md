@@ -18,7 +18,7 @@ hospital-held-out benchmarks.
 |---|:---:|:---:|:---:|
 | **Colon (COAD)** | _(0.77)_ | **0.76** | 0.59 |
 | **Stomach (STAD)** | **0.74** | _(0.86)_ | 0.59 |
-| **Endometrium (UCEC)** | 0.57 | 0.52 | _(0.76)_ |
+| **Endometrium (UCEC)** | 0.57 | 0.52 | _(0.75)_ |
 
 The colon↔stomach results passed the pre-specified uncertainty and shuffled-label checks.
 The other cross-organ directions did not. Full values are in
@@ -34,8 +34,13 @@ We then added small numbers of labelled patients from the target organ:
   helped the endometrial model at those small sample sizes.
 - Endometrial data added little to the colon or stomach models.
 
+One cell was registered in advance as the decisive test: colon data for the stomach
+model with ten local positives. Its rule is that the paired bootstrap interval on the
+AUC gain must exclude zero. It does not (gain 0.014 [−0.031, 0.061]), so that registered
+claim is not confirmed. The gains at three to five local positives are exploratory.
+
 See the [full few-label results](results/few-label/README.md) for the figures, uncertainty
-intervals, and results at every sample size.
+intervals, the decision rule, and results at every sample size.
 
 ## Data and evaluation
 
@@ -59,14 +64,19 @@ cross-organ signal.
 ```bash
 python experiments/run_gate.py                       # zero-shot transfer matrix
 python experiments/run_few_label.py --profile quick  # fast smoke test; not reportable
-python experiments/run_few_label.py --profile full   # complete few-label analysis
+python experiments/run_few_label.py --profile full --out results/few-label-rerun  # complete analysis
 python experiments/run_site_probe.py                 # hospital-site diagnostic
 python -m pytest                                      # deterministic test suite
 ```
 
 The complete few-label run is resumable and writes a validated result bundle to
-`results/few-label/`. Its manifest records the data, model, split, seeds, and inference
-settings needed to identify the run.
+`results/few-label/`. Its manifest records the data, model, split, seeds, inference
+settings, and the numerical environment of the run. A complete bundle is never
+overwritten: to re-run, pass a new directory with `--out`.
+
+Every classifier fit uses one BLAS thread. A re-run on the same machine reproduces the
+committed tables byte for byte. A different CPU or BLAS build can move AUCs at the third
+decimal; the manifest records the host so such differences can be traced.
 
 ## Repository layout
 
