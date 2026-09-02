@@ -8,11 +8,12 @@ another organ when local MSI-positive cases are scarce. We studied colon cancer
 
 - **Stomach data gave the colon model the largest and longest-lasting boost.** With 40
   local colon-positive cases, adding the stomach cohort increased AUC from 0.751 to
-  0.804: a gain of 0.054 [0.002, 0.107].
+  0.804: a gain of 0.054 [0.002, 0.107]. This cell was not the registered test.
 - **Colon data mainly helped the stomach model when very few local positives were
   available.** The AUC gain was 0.121 [0.066, 0.177] with three local positives and
   0.067 [0.014, 0.120] with five. By ten positives, the gain was only 0.014, and the
-  interval [−0.031, 0.061] included no improvement.
+  interval [−0.031, 0.061] included no improvement. Ten positives was the registered
+  decisive cell, so the registered claim is not confirmed (see below).
 - **Colon data also gave the endometrial model an early boost.** The gain was clear with
   three and five local positives. The estimate stayed positive through 25, but was less
   certain after five. Stomach data gave a smaller boost that was clear only with three
@@ -67,9 +68,9 @@ cohort; an interval spanning zero means the data do not rule out no improvement.
 
 | Local MSI-positive cases | STAD→COAD AUC gain | COAD→STAD AUC gain |
 |---:|---:|---:|
-| 3 | +0.110 [0.057, 0.158] | +0.121 [0.066, 0.177] |
+| 3 | +0.110 [0.057, 0.159] | +0.121 [0.066, 0.177] |
 | 5 | +0.099 [0.048, 0.145] | +0.067 [0.014, 0.120] |
-| 10 | +0.067 [0.022, 0.111] | +0.014 [−0.031, 0.061] |
+| 10 | +0.067 [0.022, 0.112] | +0.014 [−0.031, 0.061] |
 | 25 | +0.062 [0.014, 0.112] | −0.017 [−0.056, 0.021] |
 | 40 | +0.054 [0.002, 0.107] | −0.022 [−0.061, 0.018] |
 | All available | +0.040 [−0.013, 0.103] | −0.024 [−0.068, 0.020] |
@@ -113,13 +114,44 @@ This calculation is different from the curves above. Here we compare an other-or
 model with a local-only model. The curves ask whether other-organ data still helps after
 the same local cases have been added to both models.
 
+## The registered decision rule
+
+Before the experiment ran, one cell was registered as the decisive test: colon data for
+the stomach model with ten local MSI-positive cases (single source, not pooled). The rule
+is that the paired patient-bootstrap 95% interval on the AUC gain must exclude zero. The
+observed gain is 0.014 [−0.031, 0.061], so the rule is **not met**. The
+`confirmatory_passed` column of `few_label_summaries.csv` records this verdict for that
+cell only.
+
+The plan (issue #7) originally specified a permutation test that shuffled the colon
+labels while keeping the colon rows in training. After execution we found that this
+null cannot produce a positive gain: shuffled colon rows only add noise to the same
+local cases, so all 999 null gains were negative and any observed gain would have
+looked significant. That test was removed and replaced by the interval rule above,
+which uses the same bootstrap as every other interval in this report. The change was
+made after seeing the data and is recorded on issues #1 and #7.
+
 ## How certain are the results?
 
+All intervals resample patients within each MSI class and evaluate both models on the
+same resampled patients, so an interval on the gain is a paired comparison. The
+intervals treat the 20 random draws of local cases as fixed; they do not include the
+uncertainty from which local cases were drawn. Between-draw spread is largest at three
+to five local positives, so the exact gain at those counts is less certain than the
+interval width alone suggests.
+
 Five models tested five different groups of hospitals. Their score scales differed a
-little—like one teacher grading out of 10 and another out of 100. We repeated the
-analysis using only each model's ordering of patients. Stomach data still helped the
-colon model, but the estimated gain changed at some label counts. The overall pattern is
-more dependable than any one exact AUC gain.
+little—like one teacher grading out of 10 and another out of 100. The main AUC pools
+all five groups' scores into one ranking, so a scale difference between groups can
+move it. As a check, we also computed the AUC inside each hospital group and averaged
+the five values; this never compares scores from different models. The two agree
+within 0.01 for most endometrium-target cells. For colon and stomach targets the
+per-group average is usually higher, by up to 0.05, because one colon group is much
+larger than the others and the local-only models score on different scales across
+groups. Every gain whose interval excludes zero has the same sign under both metrics.
+The four cells where the sign differs are all pooled STAD+UCEC→COAD gains within 0.013
+of zero. The `fold_diverged` column marks cells where the two metrics differ by more
+than 0.01.
 
 What these results support:
 
@@ -142,13 +174,20 @@ What they do not show:
 ## Reproduce the analysis
 
 ```bash
-python experiments/run_few_label.py --profile quick  # smoke test; not reportable
-python experiments/run_few_label.py --profile full   # complete analysis
+python experiments/run_few_label.py --profile quick --out /tmp/few-label-quick  # smoke test; not reportable
+python experiments/run_few_label.py --profile full --out results/few-label-rerun  # complete analysis, about 15 min on 8 cores
 python -m pytest
 ```
 
+A complete bundle is never overwritten. Running the command against `results/few-label/`
+validates the committed bundle and stops, naming the commit that produced it. Every
+classifier fit uses one BLAS thread; a re-run on the same machine reproduces the committed
+tables byte for byte, and `manifest.json` records the host and BLAS build so a rounding
+difference from another machine can be traced.
+
 The main numerical outputs are:
 
-- `few_label_summaries.csv` — AUC with and without other-organ data, plus their difference;
+- `few_label_summaries.csv` — AUC with and without other-organ data, their difference, the
+  per-group sensitivity, and the registered verdict;
 - `few_label_equivalence.csv` — zero-shot equivalent local positives;
-- `manifest.json` — the exact run configuration and data identities.
+- `manifest.json` — the exact run configuration, data identities, and environment.
