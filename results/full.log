@@ -11,35 +11,3 @@ DATA
 ==============================================================================
 WITHIN-ORGAN CEILING  (random-CV = site-inflated, site-out = honest)
 ==============================================================================
-  COAD: random-CV=0.812  site-out=0.767 [0.697,0.832]  gap=+0.045  | site-out test-pos/fold=[18, 18, 14, 10, 14]
-  UCEC: random-CV=0.749  site-out=0.755 [0.710,0.799]  gap=-0.005  | site-out test-pos/fold=[32, 30, 29, 34, 30]
-  STAD: random-CV=0.881  site-out=0.858 [0.812,0.904]  gap=+0.023  | site-out test-pos/fold=[20, 12, 6, 16, 9]
-
-==============================================================================
-ZERO-SHOT TRANSFER  (source -> never-seen target)
-==============================================================================
-
-  target = COAD  (n=391, MSI+=74, prev=19%)
-     UCEC -> COAD:  AUC=0.571 [0.496,0.647]  perm_p=0.2198  [----]
-     STAD -> COAD:  AUC=0.744 [0.680,0.808]  perm_p=0.0030  [PASS]  <== confirmatory
-    UCEC+STAD -> COAD:  AUC=0.660 [0.591,0.728]  perm_p=0.0160  (combined, exploratory)
-
-  target = UCEC  (n=487, MSI+=155, prev=32%)
-     COAD -> UCEC:  AUC=0.588 [0.531,0.639]  perm_p=0.0989  [----]
-     STAD -> UCEC:  AUC=0.590 [0.539,0.640]  perm_p=0.1009  [----]
-    COAD+STAD -> UCEC:  AUC=0.569 [0.518,0.622]  perm_p=0.1538  (combined, exploratory)
-
-  target = STAD  (n=371, MSI+=63, prev=17%)
-     COAD -> STAD:  AUC=0.760 [0.697,0.819]  perm_p=0.0010  [PASS]  <== confirmatory
-     UCEC -> STAD:  AUC=0.521 [0.443,0.604]  perm_p=0.4406  [----]
-    COAD+UCEC -> STAD:  AUC=0.735 [0.666,0.798]  perm_p=0.0010  (combined, exploratory)
-
-==============================================================================
-VERDICT
-==============================================================================
-  STAD -> COAD: AUC=0.744 [0.680,0.808] perm_p=0.0030  [PASS]
-  COAD -> STAD: AUC=0.760 [0.697,0.819] perm_p=0.0010  [PASS]
-
-  >>> STRONG PASS  — cross-organ MSI transfer is real (both COAD<->STAD directions).
-
-Saved: /data/pathology/projects/clement/code/panmorph/results/gate_results.csv

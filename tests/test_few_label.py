@@ -1,21 +1,17 @@
-import csv
 from dataclasses import replace
-from pathlib import Path
 
 import numpy as np
 import pytest
 
-from experiments.run_few_label import write_reportable_results
 from panmorph.data import Cohort
 from panmorph.few_label import (
     AucRecord,
-    DrawRecord,
     FEW_LABEL_DRAW_IDS,
     FEW_LABEL_RUNGS,
     PredictionRecord,
     TraceResult,
+    fold_auc_diverged,
     preflight_rungs,
-    rank_auc_diverged,
     run_few_label_matrix,
     sample_rung,
     summarize_predictions,
@@ -379,170 +375,7 @@ def test_zero_shot_anchor_requires_a_committed_counterpart_for_every_endpoint() 
         validate_zero_shot_anchors(endpoint_aucs, zero_shot_rows[:1])
 
 
-def _write_zero_shot_anchor(path: Path, source: str, target: str, auc: float) -> None:
-    path.write_text(
-        "component,source,target,auc\n"
-        f"zeroshot,{source},{target},{auc}\n"
-    )
-
-
-@pytest.fixture(scope="module")
-def reportable_result() -> TraceResult:
-    return TraceResult(
-        draws=(
-            DrawRecord(
-                draw_seed=None,
-                k=0,
-                fold=0,
-                held_out_sites=("E",),
-                arm="warm",
-                source="SOURCE",
-                target="TARGET",
-                origin="source",
-                cohort="SOURCE",
-                case_id="S00",
-                label=1,
-                site="X",
-            ),
-        ),
-        predictions=(
-            PredictionRecord(
-                draw_seed=None,
-                k=0,
-                fold=0,
-                held_out_sites=("E",),
-                arm="warm",
-                source="SOURCE",
-                target="TARGET",
-                case_id="T00",
-                label=1,
-                score=0.25,
-            ),
-        ),
-        aucs=(
-            AucRecord(
-                draw_seed=None,
-                k=0,
-                arm="warm",
-                source="SOURCE",
-                target="TARGET",
-                raw_auc=0.7,
-                rank_auc=0.6,
-                rank_gap=0.1,
-                rank_diverged=True,
-            ),
-        ),
-    )
-
-
-@pytest.fixture
-def report_output(
-    tmp_path: Path,
-    reportable_result: TraceResult,
-) -> Path:
-    zero_shot = tmp_path / "zero_shot.csv"
-    _write_zero_shot_anchor(zero_shot, "SOURCE", "TARGET", 0.7)
-    out = tmp_path / "report"
-    write_reportable_results(reportable_result, zero_shot, out)
-    return out
-
-
-def test_reportable_writer_emits_all_three_tables(report_output: Path) -> None:
-    assert {path.name for path in report_output.iterdir()} == {
-        "few_label_draws.csv",
-        "few_label_predictions.csv",
-        "few_label_results.csv",
-    }
-
-
-def test_reportable_writer_serializes_the_tidy_result_schema(report_output: Path) -> None:
-    with (report_output / "few_label_results.csv").open(newline="") as handle:
-        result_rows = tuple(csv.DictReader(handle))
-    assert tuple(result_rows[0]) == (
-        "experiment",
-        "source",
-        "target",
-        "base",
-        "arm",
-        "k",
-        "draw_seed",
-        "auc",
-        "rank_auc",
-        "rank_gap",
-        "rank_diverged",
-    )
-    assert result_rows[0] == {
-        "experiment": "few-label",
-        "source": "SOURCE",
-        "target": "TARGET",
-        "base": "single",
-        "arm": "warm",
-        "k": "0",
-        "draw_seed": "",
-        "auc": "0.7",
-        "rank_auc": "0.6",
-        "rank_gap": "0.1",
-        "rank_diverged": "True",
-    }
-
-
-def test_reportable_writer_serializes_auditable_training_rows(
-    report_output: Path,
-) -> None:
-    with (report_output / "few_label_draws.csv").open(newline="") as handle:
-        draw_rows = tuple(csv.DictReader(handle))
-
-    assert draw_rows[0] == {
-        "draw_seed": "",
-        "k": "0",
-        "fold": "0",
-        "held_out_sites": "('E',)",
-        "arm": "warm",
-        "source": "SOURCE",
-        "target": "TARGET",
-        "origin": "source",
-        "cohort": "SOURCE",
-        "case_id": "S00",
-        "label": "1",
-        "site": "X",
-    }
-
-
-def test_reportable_writer_serializes_auditable_prediction_rows(
-    report_output: Path,
-) -> None:
-    with (report_output / "few_label_predictions.csv").open(newline="") as handle:
-        prediction_rows = tuple(csv.DictReader(handle))
-
-    assert prediction_rows[0] == {
-        "draw_seed": "",
-        "k": "0",
-        "fold": "0",
-        "held_out_sites": "('E',)",
-        "arm": "warm",
-        "source": "SOURCE",
-        "target": "TARGET",
-        "case_id": "T00",
-        "label": "1",
-        "score": "0.25",
-    }
-
-
-def test_reportable_writer_creates_no_output_when_an_anchor_fails(
-    tmp_path: Path,
-    reportable_result: TraceResult,
-) -> None:
-    zero_shot = tmp_path / "zero_shot.csv"
-    _write_zero_shot_anchor(zero_shot, "SOURCE", "TARGET", 0.0)
-    out = tmp_path / "report"
-
-    with np.testing.assert_raises_regex(ValueError, "zero-shot anchor mismatch"):
-        write_reportable_results(reportable_result, zero_shot, out)
-
-    assert not out.exists()
-
-
-def test_auc_summary_pools_raw_scores_and_percentile_ranks_with_average_ties() -> None:
+def test_auc_summary_pools_raw_scores_and_averages_per_fold_aucs() -> None:
     labels_scores_folds = [
         (0, 0.1, 0),
         (1, 0.9, 0),
@@ -569,14 +402,46 @@ def test_auc_summary_pools_raw_scores_and_percentile_ranks_with_average_ties() -
 
     (summary,) = summarize_predictions(predictions)
 
+    # Fold 0 separates its pair perfectly; fold 1 scores 0.5/4 with one tie.
     assert summary.raw_auc == 11 / 18
-    assert summary.rank_auc == 4 / 9
-    assert summary.rank_gap == 0.16666666666666674
-    assert summary.rank_diverged is True
-    assert summary.raw_auc != (1.0 + 0.125) / 2
+    assert summary.fold_auc == (1.0 + 0.125) / 2
+    assert summary.fold_gap == pytest.approx(11 / 18 - 0.5625)
+    assert summary.fold_diverged is True
 
 
-def test_rank_sensitivity_flags_only_gaps_greater_than_point_zero_one() -> None:
-    assert rank_auc_diverged(0.70, 0.69) is False
-    assert rank_auc_diverged(0.70, 0.6899999999995) is True
-    assert rank_auc_diverged(0.70, 0.689999) is True
+def test_auc_summary_rejects_a_fold_without_both_labels() -> None:
+    predictions = tuple(
+        PredictionRecord(
+            draw_seed=3, k=1, fold=fold, held_out_sites=(str(fold),), arm="warm",
+            source="SOURCE", target="TARGET", case_id=f"P{index}",
+            label=label, score=score,
+        )
+        for index, (label, score, fold) in enumerate(
+            ((0, 0.1, 0), (1, 0.9, 0), (0, 0.8, 1), (0, 0.6, 1))
+        )
+    )
+
+    with pytest.raises(ValueError, match="fold 1 lacks both labels"):
+        summarize_predictions(predictions)
+
+
+def test_fold_sensitivity_flags_only_gaps_greater_than_point_zero_one() -> None:
+    assert fold_auc_diverged(0.70, 0.69) is False
+    assert fold_auc_diverged(0.70, 0.6899999999995) is True
+    assert fold_auc_diverged(0.70, 0.689999) is True
+
+
+def test_constant_scores_give_exactly_half_for_both_metrics() -> None:
+    labels_folds = ((1, 0), (0, 0), (0, 0), (1, 1), (0, 1), (1, 1), (0, 1))
+    predictions = tuple(
+        PredictionRecord(
+            draw_seed=None, k=0, fold=fold, held_out_sites=(str(fold),), arm="cold",
+            source="target-only", target="TARGET", case_id=f"P{index}",
+            label=label, score=0.5,
+        )
+        for index, (label, fold) in enumerate(labels_folds)
+    )
+
+    (summary,) = summarize_predictions(predictions)
+
+    assert (summary.raw_auc, summary.fold_auc, summary.fold_diverged) == (0.5, 0.5, False)

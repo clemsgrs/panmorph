@@ -1,10 +1,8 @@
-"""The frozen-embedding linear probe — pre-registered, fixed hyperparameters.
+"""The frozen-embedding linear probe with pre-registered, fixed hyperparameters.
 
-Decision #6: sklearn logistic regression with fixed HPs and no tuning. This keeps
-the leakage surface minimal (nothing is tuned, so nothing can leak across the
-source/target boundary) and the interpretation parsimonious (a *linear* boundary in
-frozen PRISM space transferring across organs is strong evidence of shared signal).
-The torch linear-probe / MLP ladder comes later, after the gate passes.
+Nothing is tuned, so nothing can leak across the source/target boundary, and the
+interpretation stays parsimonious: a linear boundary in frozen PRISM space that
+transfers across organs is strong evidence of shared signal.
 """
 from __future__ import annotations
 

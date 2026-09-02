@@ -1,11 +1,11 @@
 """Pooled out-of-fold cross-validation for the within-organ reference ceiling.
 
-Decision #8/#9: the honest ceiling is the leave-site-out AUC (GroupKFold by TSS,
-pooled OOF). Random-CV is kept only as the site-inflated contrast. We always pool
-out-of-fold predictions and compute one AUC over the full cohort — never average
-per-fold AUCs (a positive-light fold would yield a garbage per-fold AUC). The only
-real failure mode is a *training* fold starved of positives, which the guard catches.
-See README.md.
+The honest ceiling is the leave-site-out AUC (GroupKFold by tissue-source site,
+pooled OOF). Random-CV is kept only as the site-inflated contrast. The primary
+metric always pools out-of-fold predictions into one AUC over the full cohort; the
+mean of per-fold AUCs is reported only as a scale sensitivity in the few-label
+analysis, where every fold holds both labels. The only real failure mode is a
+*training* fold starved of positives, which the guard catches.
 """
 from __future__ import annotations
 

@@ -10,9 +10,9 @@ def _cell(source: str, target: str, base: str, k=0) -> FewLabelPlotCell:
         warm=(0.75, 0.70, 0.80),
         cold=(0.50, 0.50, 0.50),
         lift=(0.25, 0.20, 0.30),
-        rank_diverged=False,
+        fold_diverged=False,
         confirmatory=False,
-        permutation_p=None,
+        passed=None,
     )
 
 
@@ -72,7 +72,7 @@ def test_panel_exposes_local_ceiling_and_equivalence_mark() -> None:
         FewLabelPlotCell(
             "COAD", "STAD", "single", 10,
             (0.802, 0.750, 0.851), (0.788, 0.753, 0.821),
-            (0.014, -0.031, 0.061), False, True, 0.001,
+            (0.014, -0.031, 0.061), False, True, False,
         ),
         FewLabelPlotCell(
             "COAD", "STAD", "single", "all",

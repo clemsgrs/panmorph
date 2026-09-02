@@ -18,9 +18,9 @@ class FewLabelPlotCell:
     warm: tuple[float, float, float]
     cold: tuple[float, float, float]
     lift: tuple[float, float, float]
-    rank_diverged: bool
+    fold_diverged: bool
     confirmatory: bool
-    permutation_p: float | None
+    passed: bool | None
 
 
 @dataclass(frozen=True)

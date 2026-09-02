@@ -1,18 +1,22 @@
 """Site-clean paired warm/cold tracer for the few-label transfer experiment."""
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Iterable, Literal, Mapping
 
 import numpy as np
-from joblib import Parallel, delayed
 from sklearn.isotonic import IsotonicRegression
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import GroupKFold
 
 from .data import Cohort
+from .metrics import (
+    BOOTSTRAP_REPLICATES,
+    bootstrap_auc as _bootstrap_auc,
+    keyed_rng as _keyed_rng,
+    stratified_bootstrap_indices,
+)
 from .probe import fit_predict
 
 Arm = Literal["warm", "cold"]
@@ -21,10 +25,8 @@ Base = Literal["single", "pooled"]
 Rung = int | Literal["all"]
 FEW_LABEL_RUNGS: tuple[Rung, ...] = (0, 3, 5, 10, 25, 40, "all")
 FEW_LABEL_DRAW_IDS: tuple[int, ...] = tuple(range(20))
-BOOTSTRAP_REPLICATES = 2_000
-PERMUTATION_COUNT = 999
 CONFIRMATORY_CELL = ("COAD", "STAD", "single", 10)
-CONFIRMATORY_ALPHA = 0.05
+CONFIRMATORY_RULE = "paired stratified patient-bootstrap 95% interval on the lift excludes zero"
 
 
 @dataclass(frozen=True)
@@ -80,9 +82,9 @@ class AucRecord:
     source: str
     target: str
     raw_auc: float
-    rank_auc: float
-    rank_gap: float
-    rank_diverged: bool
+    fold_auc: float
+    fold_gap: float
+    fold_diverged: bool
 
 
 @dataclass(frozen=True)
@@ -113,14 +115,15 @@ class CellEstimate:
     warm: IntervalEstimate
     cold: IntervalEstimate
     lift: IntervalEstimate
-    rank_warm: float
-    rank_cold: float
-    rank_lift: float
-    rank_diverged: bool
+    fold_warm: float
+    fold_cold: float
+    fold_lift: float
+    fold_diverged: bool
     bootstrap_warm: np.ndarray
     bootstrap_cold: np.ndarray
     bootstrap_lift: np.ndarray
     confirmatory: bool
+    passed: bool | None
 
 
 @dataclass(frozen=True)
@@ -157,17 +160,6 @@ class EquivalenceSummary(EquivalenceDistribution):
 
 
 @dataclass(frozen=True)
-class ConfirmatoryResult:
-    """The sole registered COAD-to-STAD superiority test."""
-
-    observed_lift: float
-    p_value: float
-    significant: bool
-    n_permutations: int
-    null_lifts: np.ndarray
-
-
-@dataclass(frozen=True)
 class EquivalenceCellSummary:
     source: str
     target: str
@@ -181,9 +173,9 @@ class FewLabelInference:
     equivalences: tuple[EquivalenceCellSummary, ...]
 
 
-def rank_auc_diverged(raw_auc: float, rank_auc: float) -> bool:
+def fold_auc_diverged(raw_auc: float, fold_auc: float) -> bool:
     """Return whether the pre-specified sensitivity gap is greater than 0.01."""
-    gap = abs(Decimal(str(raw_auc)) - Decimal(str(rank_auc)))
+    gap = abs(Decimal(str(raw_auc)) - Decimal(str(fold_auc)))
     return gap > Decimal("0.01")
 
 
@@ -213,29 +205,16 @@ def _binary_auc(labels: np.ndarray, scores: np.ndarray) -> float:
     return u / (n_positive * n_negative)
 
 
-def _bootstrap_auc(
-    labels: np.ndarray, scores: np.ndarray, schedule: np.ndarray
-) -> np.ndarray:
-    """Evaluate a stratified bootstrap schedule with bounded vectorized comparisons."""
-    scheduled_labels = labels[schedule[0]]
-    positive_columns = scheduled_labels == 1
-    negative_columns = ~positive_columns
-    aucs = np.empty(len(schedule), dtype=float)
-    for start in range(0, len(schedule), 100):
-        stop = min(start + 100, len(schedule))
-        sampled = scores[schedule[start:stop]]
-        positive = sampled[:, positive_columns, None]
-        negative = sampled[:, None, negative_columns]
-        aucs[start:stop] = np.mean(positive > negative, axis=(1, 2)) + 0.5 * np.mean(
-            positive == negative, axis=(1, 2)
-        )
-    return aucs
-
-
 def summarize_predictions(
     predictions: tuple[PredictionRecord, ...] | list[PredictionRecord],
 ) -> tuple[AucRecord, ...]:
-    """Compute raw and within-fold-ranked AUCs from concatenated OOF predictions."""
+    """Compute pooled and mean per-fold AUCs from concatenated OOF predictions.
+
+    The pooled AUC over all out-of-fold scores is the primary metric. The mean of
+    the per-fold AUCs is the registered scale sensitivity: it never compares scores
+    produced by different fold models, so it cannot be moved by calibration
+    differences between folds. Every fold must contain both labels.
+    """
     keys = list(
         dict.fromkeys((p.draw_seed, p.k, p.arm, p.source, p.target) for p in predictions)
     )
@@ -249,14 +228,16 @@ def summarize_predictions(
         ]
         labels = np.asarray([p.label for p in arm_predictions])
         scores = np.asarray([p.score for p in arm_predictions])
-        ranked = np.empty(len(scores), dtype=float)
         folds = np.asarray([p.fold for p in arm_predictions])
+        fold_aucs = []
         for fold in np.unique(folds):
             in_fold = folds == fold
-            ranked[in_fold] = _percentile_ranks(scores[in_fold])
+            if len(np.unique(labels[in_fold])) < 2:
+                raise ValueError(f"fold {fold} lacks both labels; per-fold AUC is undefined")
+            fold_aucs.append(_binary_auc(labels[in_fold], scores[in_fold]))
         raw_auc = float(roc_auc_score(labels, scores))
-        rank_auc = float(roc_auc_score(labels, ranked))
-        gap = abs(raw_auc - rank_auc)
+        fold_auc = float(np.mean(fold_aucs))
+        gap = abs(raw_auc - fold_auc)
         summaries.append(
             AucRecord(
                 draw_seed=draw_seed,
@@ -265,48 +246,22 @@ def summarize_predictions(
                 source=source,
                 target=target,
                 raw_auc=raw_auc,
-                rank_auc=rank_auc,
-                rank_gap=gap,
-                rank_diverged=rank_auc_diverged(raw_auc, rank_auc),
+                fold_auc=fold_auc,
+                fold_gap=gap,
+                fold_diverged=fold_auc_diverged(raw_auc, fold_auc),
             )
         )
     return tuple(summaries)
 
 
-def _keyed_rng(draw_seed: int, *key: str) -> np.random.Generator:
-    material = "\x1f".join((str(draw_seed), *key)).encode()
-    seed = int.from_bytes(hashlib.sha256(material).digest()[:8], "little")
-    return np.random.default_rng(seed)
-
-
-def stratified_bootstrap_indices(
-    labels: np.ndarray,
-    *,
-    seed: int = 0,
-    key: tuple[str, ...] = (),
-    n_replicates: int = BOOTSTRAP_REPLICATES,
-) -> np.ndarray:
-    """Return a deterministic label-stratified patient bootstrap schedule."""
-    labels = np.asarray(labels)
-    classes = np.unique(labels)
-    if len(classes) < 2:
-        raise ValueError("patient bootstraps require at least two labels")
-    rng = _keyed_rng(seed, "bootstrap", *key)
-    strata = tuple(np.flatnonzero(labels == label) for label in classes)
-    return np.asarray(
-        [
-            np.concatenate(
-                [rng.choice(indices, size=len(indices), replace=True) for indices in strata]
-            )
-            for _ in range(n_replicates)
-        ],
-        dtype=int,
-    )
-
-
 def is_confirmatory_cell(source: str, target: str, k: Rung) -> bool:
     """Return whether this is the sole registered confirmatory few-label cell."""
     return (source, target, _source_base(source), k) == CONFIRMATORY_CELL
+
+
+def confirmatory_passed(lift: IntervalEstimate) -> bool:
+    """Apply the registered rule: the paired lift interval must exclude zero."""
+    return lift.lower > 0.0
 
 
 def _source_members(source: str) -> tuple[str, ...]:
@@ -325,119 +280,6 @@ def count_source_cases(
         source: sum(cohorts[name].n for name in _source_members(source))
         for source in sources
     }
-
-
-def source_label_permutations(
-    labels: np.ndarray,
-    source: str,
-    *,
-    seed: int = 0,
-    n_permutations: int = PERMUTATION_COUNT,
-) -> np.ndarray:
-    """Generate keyed source-label permutations without changing prevalence."""
-    labels = np.asarray(labels)
-    rng = _keyed_rng(seed, "permutation", source)
-    return np.asarray([rng.permutation(labels) for _ in range(n_permutations)])
-
-
-def empirical_superiority_p(observed: float, null: np.ndarray) -> float:
-    """One-sided empirical p-value with the registered plus-one correction."""
-    null = np.asarray(null)
-    return float((1 + np.sum(null >= observed)) / (1 + len(null)))
-
-
-def confirmatory_observed(
-    predictions: tuple[PredictionRecord, ...] | list[PredictionRecord],
-    draw_ids: tuple[int, ...] = FEW_LABEL_DRAW_IDS,
-) -> tuple[float, dict[int, float]]:
-    """Return registered observed mean lift and cold AUCs keyed by draw."""
-    warm = summarize_predictions(
-        [
-            record for record in predictions
-            if (record.source, record.target, record.k, record.arm)
-            == ("COAD", "STAD", 10, "warm")
-        ]
-    )
-    cold = summarize_predictions(
-        [
-            record for record in predictions
-            if (record.source, record.target, record.k, record.arm)
-            == ("target-only", "STAD", 10, "cold")
-        ]
-    )
-    warm_by_draw = {int(record.draw_seed): record.raw_auc for record in warm}
-    cold_by_draw = {int(record.draw_seed): record.raw_auc for record in cold}
-    if tuple(sorted(warm_by_draw)) != draw_ids or warm_by_draw.keys() != cold_by_draw.keys():
-        raise ValueError("confirmatory predictions require the complete fixed paired draws")
-    observed = float(
-        np.mean([warm_by_draw[draw] - cold_by_draw[draw] for draw in draw_ids])
-    )
-    return observed, cold_by_draw
-
-
-def evaluate_confirmatory_null(
-    source: Cohort,
-    target: Cohort,
-    shuffled_labels: np.ndarray,
-    cold_by_draw: Mapping[int, float],
-    *,
-    draw_ids: tuple[int, ...] = FEW_LABEL_DRAW_IDS,
-    n_jobs: int = -1,
-) -> np.ndarray:
-    """Evaluate supplied coherent source-label shuffles at the registered cell."""
-    def null_lift(labels: np.ndarray) -> float:
-        shuffled_source = replace(source, y=labels)
-        warm_aucs = [
-            trace_paired_cell(
-                shuffled_source, target, 10, draw, arms=("warm",)
-            ).aucs[0].raw_auc
-            for draw in draw_ids
-        ]
-        return float(
-            np.mean(
-                [
-                    warm_auc - cold_by_draw[draw]
-                    for draw, warm_auc in zip(draw_ids, warm_aucs)
-                ]
-            )
-        )
-
-    return np.asarray(
-        Parallel(n_jobs=n_jobs)(delayed(null_lift)(labels) for labels in shuffled_labels)
-    )
-
-
-def run_confirmatory_test(
-    source: Cohort,
-    target: Cohort,
-    observed_predictions: tuple[PredictionRecord, ...] | list[PredictionRecord],
-    *,
-    seed: int = 0,
-    n_jobs: int = -1,
-    draw_ids: tuple[int, ...] = FEW_LABEL_DRAW_IDS,
-    n_permutations: int = PERMUTATION_COUNT,
-) -> ConfirmatoryResult:
-    """Run the one registered 999-permutation mean-lift superiority test."""
-    if not is_confirmatory_cell(source.name, target.name, 10):
-        raise ValueError("only single-source COAD -> STAD at k=10 is confirmatory")
-    observed_lift, cold_by_draw = confirmatory_observed(observed_predictions, draw_ids)
-
-    permutations = source_label_permutations(
-        source.y, source.name, seed=seed, n_permutations=n_permutations
-    )
-
-    null_lifts = evaluate_confirmatory_null(
-        source, target, permutations, cold_by_draw,
-        draw_ids=draw_ids, n_jobs=n_jobs,
-    )
-    p_value = empirical_superiority_p(observed_lift, null_lifts)
-    return ConfirmatoryResult(
-        observed_lift=observed_lift,
-        p_value=p_value,
-        significant=p_value < CONFIRMATORY_ALPHA,
-        n_permutations=len(null_lifts),
-        null_lifts=null_lifts,
-    )
 
 
 def _ordered_draw_scores(
@@ -523,10 +365,12 @@ def estimate_few_label_cell(
     )
     bootstrap_lift = bootstrap_warm - bootstrap_cold
 
-    warm_rank = float(np.mean([record.rank_auc for record in summarize_predictions(warm)]))
-    cold_rank = float(np.mean([record.rank_auc for record in summarize_predictions(cold)]))
-    rank_lift = warm_rank - cold_rank
+    warm_fold = float(np.mean([record.fold_auc for record in summarize_predictions(warm)]))
+    cold_fold = float(np.mean([record.fold_auc for record in summarize_predictions(cold)]))
+    fold_lift = warm_fold - cold_fold
     point_lift = point_warm - point_cold
+    lift = _interval(point_lift, bootstrap_lift)
+    confirmatory = is_confirmatory_cell(source, target, k)
     return CellEstimate(
         source=source,
         target=target,
@@ -535,21 +379,22 @@ def estimate_few_label_cell(
         n_draws=len(warm_draws),
         warm=_interval(point_warm, bootstrap_warm),
         cold=_interval(point_cold, bootstrap_cold),
-        lift=_interval(point_lift, bootstrap_lift),
-        rank_warm=warm_rank,
-        rank_cold=cold_rank,
-        rank_lift=rank_lift,
-        rank_diverged=any(
+        lift=lift,
+        fold_warm=warm_fold,
+        fold_cold=cold_fold,
+        fold_lift=fold_lift,
+        fold_diverged=any(
             (
-                rank_auc_diverged(point_warm, warm_rank),
-                rank_auc_diverged(point_cold, cold_rank),
-                rank_auc_diverged(point_lift, rank_lift),
+                fold_auc_diverged(point_warm, warm_fold),
+                fold_auc_diverged(point_cold, cold_fold),
+                fold_auc_diverged(point_lift, fold_lift),
             )
         ),
         bootstrap_warm=bootstrap_warm,
         bootstrap_cold=bootstrap_cold,
         bootstrap_lift=bootstrap_lift,
-        confirmatory=is_confirmatory_cell(source, target, k),
+        confirmatory=confirmatory,
+        passed=confirmatory_passed(lift) if confirmatory else None,
     )
 
 

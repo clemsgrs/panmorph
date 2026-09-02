@@ -9,12 +9,21 @@ import panmorph.few_label_runner as runner_module
 
 from panmorph.data import Cohort
 from panmorph.few_label_runner import (
+    CompleteBundleError,
     FewLabelProfile,
     _run_cells,
     rebuild_few_label_reports,
     run_few_label_bundle,
     validate_few_label_bundle,
 )
+
+
+def _mark_partial(out: Path) -> None:
+    """Rewrite a completed manifest as still running to exercise resume paths."""
+    manifest_path = out / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["status"] = "running"
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 
 
 def _quick_cohorts() -> dict[str, Cohort]:
@@ -42,14 +51,20 @@ def test_quick_runner_emits_complete_non_reportable_bundle(tmp_path: Path) -> No
     run_few_label_bundle(out, profile="quick", cohorts=_quick_cohorts(), workers=1)
 
     manifest = json.loads((out / "manifest.json").read_text())
-    assert manifest["schema_version"] == "panmorph.few-label.bundle/v1"
+    assert manifest["schema_version"] == "panmorph.few-label.bundle/v2"
     assert manifest["profile"] == "quick"
     assert manifest["reportable"] is False
     assert manifest["status"] == "complete"
     assert manifest["configuration"]["rungs"] == [0, 10, "all"]
     assert manifest["configuration"]["draw_ids"] == [0]
     assert manifest["configuration"]["bootstrap_replicates"] == 50
-    assert manifest["configuration"]["permutations"] == 9
+    assert "permutations" not in manifest["configuration"]
+    assert manifest["configuration"]["confirmatory"]["cell"] == {
+        "source": "COAD", "target": "STAD", "base": "single", "k": 10,
+    }
+    assert manifest["model"]["hyperparameters"] == {
+        "C": 1.0, "class_weight": "balanced", "max_iter": 2000,
+    }
     assert manifest["resources"]["workers"] == 1
     assert manifest["features"]["hashes"] == {
         "COAD": "lxbzb8rd",
@@ -65,7 +80,6 @@ def test_quick_runner_emits_complete_non_reportable_bundle(tmp_path: Path) -> No
         "few_label_aucs.csv",
         "few_label_summaries.csv",
         "few_label_equivalence.csv",
-        "few_label_confirmatory_null.csv",
         "few_label_value.png",
         "few_label_value.pdf",
         "few_label_lift.png",
@@ -95,8 +109,16 @@ def test_quick_runner_emits_complete_non_reportable_bundle(tmp_path: Path) -> No
             {"source": "COAD", "target": "STAD", "cohort": "COAD"},
             {"source": "STAD", "target": "COAD", "cohort": "STAD"},
         ]
-    with (out / "few_label_confirmatory_null.csv").open(newline="") as handle:
-        assert len(tuple(csv.DictReader(handle))) == 9
+    assert not (out / "few_label_confirmatory_null.csv").exists()
+    with (out / "few_label_summaries.csv").open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    verdicts = {
+        (row["source"], row["target"], row["k"]): row["confirmatory_passed"] for row in rows
+    }
+    assert verdicts[("COAD", "STAD", "10")] in {"True", "False"}
+    assert all(
+        value == "" for key, value in verdicts.items() if key != ("COAD", "STAD", "10")
+    )
 
 
 def test_runner_derives_inference_only_for_write_and_verification(
@@ -148,13 +170,14 @@ def test_reports_can_be_rebuilt_and_numeric_corruption_is_rejected(tmp_path: Pat
     validate_few_label_bundle(out)
 
 
-def test_compatible_resume_uses_complete_cell_and_permutation_checkpoints(
+def test_compatible_resume_uses_complete_cell_checkpoints(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     out = tmp_path / "bundle"
     cohorts = _quick_cohorts()
     run_few_label_bundle(out, profile="quick", cohorts=cohorts, workers=1)
     expected = (out / "few_label_predictions.csv").read_bytes()
+    _mark_partial(out)
 
     def unexpected_execution(*_args, **_kwargs):
         raise AssertionError("a complete checkpoint was recomputed")
@@ -163,14 +186,44 @@ def test_compatible_resume_uses_complete_cell_and_permutation_checkpoints(
     run_few_label_bundle(out, profile="quick", cohorts=cohorts, workers=1)
 
     assert (out / "few_label_predictions.csv").read_bytes() == expected
+    assert json.loads((out / "manifest.json").read_text())["status"] == "complete"
 
 
-def test_resume_recomputes_incomplete_cell_and_permutation_checkpoints(
+def test_complete_bundle_is_validated_and_never_overwritten(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     out = tmp_path / "bundle"
     cohorts = _quick_cohorts()
     run_few_label_bundle(out, profile="quick", cohorts=cohorts, workers=1)
+    before = {path.name: path.read_bytes() for path in out.iterdir() if path.is_file()}
+    commit = json.loads((out / "manifest.json").read_text())["code"]["commit"]
+
+    def unexpected_execution(*_args, **_kwargs):
+        raise AssertionError("a complete bundle was re-executed")
+
+    monkeypatch.setattr(runner_module, "trace_paired_cell", unexpected_execution)
+    monkeypatch.setattr(
+        runner_module, "_code_identity",
+        lambda: {"commit": "later-commit", "sha256": "0" * 64},
+    )
+    with pytest.raises(CompleteBundleError, match=f"commit {commit}.*pass a new --out"):
+        run_few_label_bundle(out, profile="quick", cohorts=cohorts, workers=1)
+
+    after = {path.name: path.read_bytes() for path in out.iterdir() if path.is_file()}
+    assert after == before
+
+    (out / "few_label_aucs.csv").write_text("wrong,column\n1,2\n")
+    with pytest.raises(ValueError, match="invalid schema for few_label_aucs.csv"):
+        run_few_label_bundle(out, profile="quick", cohorts=cohorts, workers=1)
+
+
+def test_resume_recomputes_incomplete_cell_checkpoints(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = tmp_path / "bundle"
+    cohorts = _quick_cohorts()
+    run_few_label_bundle(out, profile="quick", cohorts=cohorts, workers=1)
+    _mark_partial(out)
     checkpoint = next(
         path
         for path in (out / "checkpoints" / "cells").glob("*/draws.csv")
@@ -191,29 +244,6 @@ def test_resume_recomputes_incomplete_cell_and_permutation_checkpoints(
     assert calls == 1
     validate_few_label_bundle(out)
 
-    permutation = next((out / "checkpoints" / "permutations").glob("*.csv"))
-    with permutation.open(newline="") as handle:
-        rows = list(csv.DictReader(handle))
-        fieldnames = tuple(rows[0])
-    rows[0]["null_mean_lift"] = "nan"
-    with permutation.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-    original_null = runner_module.evaluate_confirmatory_null
-    null_calls = 0
-
-    def recording_null(*args, **kwargs):
-        nonlocal null_calls
-        null_calls += 1
-        return original_null(*args, **kwargs)
-
-    monkeypatch.setattr(runner_module, "evaluate_confirmatory_null", recording_null)
-    run_few_label_bundle(out, profile="quick", cohorts=cohorts, workers=1)
-
-    assert null_calls == 1
-    validate_few_label_bundle(out)
-
 
 def test_resume_refuses_changed_data_identity(tmp_path: Path) -> None:
     out = tmp_path / "bundle"
@@ -228,6 +258,10 @@ def test_resume_refuses_changed_data_identity(tmp_path: Path) -> None:
         changed_stad.case_ids,
     )
 
+    with pytest.raises(ValueError, match="different configuration; pass a new --out"):
+        run_few_label_bundle(out, profile="quick", cohorts=changed, workers=1)
+
+    _mark_partial(out)
     with pytest.raises(ValueError, match="incompatible few-label partial results"):
         run_few_label_bundle(out, profile="quick", cohorts=changed, workers=1)
 
@@ -242,7 +276,7 @@ def test_parallel_worker_count_does_not_change_result_tables(tmp_path: Path) -> 
 
     for name in (
         "few_label_draws.csv", "few_label_predictions.csv", "few_label_aucs.csv",
-        "few_label_summaries.csv", "few_label_equivalence.csv", "few_label_confirmatory_null.csv",
+        "few_label_summaries.csv", "few_label_equivalence.csv",
     ):
         assert (serial / name).read_bytes() == (parallel / name).read_bytes()
 
@@ -267,7 +301,7 @@ def test_parallel_cells_run_warm_zero_in_the_zero_shot_numerical_environment(
         )
     profile = FewLabelProfile(
         "quick", False, ("COAD", "STAD"), (("COAD", "STAD"),),
-        (0,), (), 1, 1, 1,
+        (0,), (), 1,
     )
 
     result = _run_cells(tmp_path, profile, cohorts, workers=2)

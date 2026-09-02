@@ -1,34 +1,23 @@
-import csv
 from dataclasses import replace
-from pathlib import Path
 
 import numpy as np
 import pytest
-import panmorph.few_label as few_label_module
-from joblib import parallel_config
 
-from experiments.run_few_label import read_prediction_records, write_registered_inference
-from panmorph.data import Cohort
 from panmorph.few_label import (
     BOOTSTRAP_REPLICATES,
     CONFIRMATORY_CELL,
-    ConfirmatoryResult,
-    FewLabelInference,
-    PERMUTATION_COUNT,
+    CONFIRMATORY_RULE,
+    IntervalEstimate,
     PredictionRecord,
-    AucRecord,
     FEW_LABEL_DRAW_IDS,
-    TraceResult,
-    empirical_superiority_p,
+    confirmatory_passed,
     estimate_few_label_cell,
     estimate_few_label_matrix,
     is_confirmatory_cell,
     local_positive_equivalence,
-    run_confirmatory_test,
-    source_label_permutations,
-    stratified_bootstrap_indices,
     summarize_equivalence_bootstrap,
 )
+from panmorph.metrics import stratified_bootstrap_indices
 
 
 def test_registered_bootstrap_schedule_is_stratified_and_keyed() -> None:
@@ -46,29 +35,6 @@ def test_registered_bootstrap_schedule_is_stratified_and_keyed() -> None:
     assert np.all(np.sum(labels[schedule] == 0, axis=1) == 3)
     assert np.array_equal(schedule, after_unrelated_cell)
     assert len(set(schedule[0])) < len(schedule[0])
-
-
-def test_stored_prediction_reader_restores_the_issue_six_schema(tmp_path: Path) -> None:
-    path = tmp_path / "few_label_predictions.csv"
-    path.write_text(
-        "draw_seed,k,fold,held_out_sites,arm,source,target,case_id,label,score\n"
-        '7,10,2,"(\'A\', \'B\')",warm,COAD,STAD,P01,1,0.75\n'
-    )
-
-    (record,) = read_prediction_records(path)
-
-    assert record == PredictionRecord(
-        draw_seed=7,
-        k=10,
-        fold=2,
-        held_out_sites=("A", "B"),
-        arm="warm",
-        source="COAD",
-        target="STAD",
-        case_id="P01",
-        label=1,
-        score=0.75,
-    )
 
 
 def _cell_predictions() -> tuple[PredictionRecord, ...]:
@@ -114,12 +80,30 @@ def test_cell_estimate_pairs_patients_and_fixed_draws_for_raw_auc_intervals() ->
     assert (estimate.warm.lower, estimate.warm.upper) == (0.5, 1.0)
     assert (estimate.cold.lower, estimate.cold.upper) == (0.0, 0.5)
     assert (estimate.lift.lower, estimate.lift.upper) == (0.5, 0.5)
-    assert (estimate.rank_warm, estimate.rank_cold, estimate.rank_lift) == (
+    assert (estimate.fold_warm, estimate.fold_cold, estimate.fold_lift) == (
         1.0,
         0.5,
         0.5,
     )
-    assert estimate.rank_diverged is True
+    assert estimate.fold_diverged is True
+    assert estimate.confirmatory is False
+    assert estimate.passed is None
+
+
+def test_confirmatory_verdict_applies_only_the_registered_interval_rule() -> None:
+    predictions = tuple(
+        replace(record, source="COAD" if record.arm == "warm" else "target-only", target="STAD")
+        for record in _cell_predictions()
+    )
+
+    estimate = estimate_few_label_cell(predictions, "COAD", "STAD", 10, seed=23)
+
+    assert estimate.confirmatory is True
+    assert estimate.passed is True
+    assert "excludes zero" in CONFIRMATORY_RULE
+    assert confirmatory_passed(IntervalEstimate(0.014, -0.031, 0.061)) is False
+    assert confirmatory_passed(IntervalEstimate(0.054, 0.002, 0.107)) is True
+    assert confirmatory_passed(IntervalEstimate(0.010, 0.0, 0.020)) is False
 
 
 def test_cell_estimate_rejects_an_incomplete_draw_schedule() -> None:
@@ -212,164 +196,6 @@ def test_only_single_source_coad_to_stad_at_ten_is_confirmatory() -> None:
     assert is_confirmatory_cell("COAD+UCEC", "STAD", 10) is False
     assert is_confirmatory_cell("COAD", "STAD", 5) is False
     assert is_confirmatory_cell("STAD", "COAD", 10) is False
-
-
-def test_source_label_permutations_preserve_labels_and_are_keyed() -> None:
-    labels = np.asarray([1, 0, 0, 1, 0])
-
-    schedule = source_label_permutations(labels, "COAD", seed=31)
-    source_label_permutations(labels, "UCEC", seed=31)
-    after_unrelated_source = source_label_permutations(labels, "COAD", seed=31)
-
-    assert PERMUTATION_COUNT == 999
-    assert schedule.shape == (999, 5)
-    assert np.all(np.sum(schedule == 1, axis=1) == 2)
-    assert np.all(np.sum(schedule == 0, axis=1) == 3)
-    assert np.array_equal(schedule, after_unrelated_source)
-
-
-def test_confirmatory_p_value_uses_one_sided_plus_one_convention() -> None:
-    assert empirical_superiority_p(0.5, np.asarray([0.6, 0.4, 0.5])) == 0.75
-
-
-def test_confirmatory_null_reuses_one_source_shuffle_across_all_draws(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    labels = (0, 0, 1, 1)
-    observed = tuple(
-        PredictionRecord(
-            draw_seed=draw,
-            k=10,
-            fold=index,
-            held_out_sites=(str(index),),
-            arm=arm,
-            source="COAD" if arm == "warm" else "target-only",
-            target="STAD",
-            case_id=f"P{index}",
-            label=label,
-            score=(0.1, 0.2, 0.8, 0.9)[index]
-            if arm == "warm"
-            else (0.1, 0.8, 0.2, 0.9)[index],
-        )
-        for draw in FEW_LABEL_DRAW_IDS
-        for arm in ("warm", "cold")
-        for index, label in enumerate(labels)
-    )
-    source = Cohort(
-        name="COAD",
-        X=np.arange(8, dtype=np.float32).reshape(4, 2),
-        y=np.asarray(labels),
-        sites=np.asarray(["A", "A", "B", "B"]),
-        case_ids=np.asarray([f"S{i}" for i in range(4)]),
-    )
-    target = Cohort(
-        name="STAD",
-        X=np.arange(8, dtype=np.float32).reshape(4, 2),
-        y=np.asarray(labels),
-        sites=np.asarray(["A", "B", "C", "D"]),
-        case_ids=np.asarray([f"P{i}" for i in range(4)]),
-    )
-    calls: list[tuple[int | None, tuple[int, ...]]] = []
-
-    def fake_trace(
-        shuffled_source: Cohort,
-        _target: Cohort,
-        k: int,
-        draw_seed: int | None,
-        arms: tuple[str, ...],
-    ) -> TraceResult:
-        calls.append((draw_seed, tuple(int(value) for value in shuffled_source.y)))
-        auc = float(np.dot(shuffled_source.y, np.arange(1, 5))) / 10
-        return TraceResult(
-            (),
-            (),
-            (AucRecord(draw_seed, k, "warm", "COAD", "STAD", auc, auc, 0, False),),
-        )
-
-    monkeypatch.setattr(few_label_module, "trace_paired_cell", fake_trace)
-
-    serial = run_confirmatory_test(source, target, observed, seed=41, n_jobs=1)
-
-    assert serial.n_permutations == 999
-    assert len(serial.null_lifts) == 999
-    for start in range(0, len(calls), 20):
-        block = calls[start : start + 20]
-        assert tuple(draw for draw, _ in block) == FEW_LABEL_DRAW_IDS
-        assert len({shuffled for _, shuffled in block}) == 1
-
-    calls.clear()
-    with parallel_config(backend="threading"):
-        parallel = run_confirmatory_test(source, target, observed, seed=41, n_jobs=2)
-    assert np.array_equal(serial.null_lifts, parallel.null_lifts)
-    assert serial.p_value == parallel.p_value
-
-
-def test_confirmatory_test_uses_the_configured_draw_schedule(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    labels = np.asarray([0, 0, 1, 1])
-    source = Cohort(
-        "COAD", np.arange(8, dtype=np.float32).reshape(4, 2), labels,
-        np.asarray(["A", "A", "B", "B"]), np.asarray([f"S{i}" for i in range(4)]),
-    )
-    target = Cohort(
-        "STAD", np.arange(8, dtype=np.float32).reshape(4, 2), labels,
-        np.asarray(["A", "B", "C", "D"]), np.asarray([f"T{i}" for i in range(4)]),
-    )
-    predictions = tuple(
-        PredictionRecord(
-            7, 10, index, (str(index),), arm,
-            "COAD" if arm == "warm" else "target-only", "STAD", f"T{index}",
-            int(label), score,
-        )
-        for arm, scores in (("warm", (0.1, 0.2, 0.8, 0.9)),
-                            ("cold", (0.1, 0.8, 0.2, 0.9)))
-        for index, (label, score) in enumerate(zip(labels, scores))
-    )
-
-    monkeypatch.setattr(
-        few_label_module,
-        "trace_paired_cell",
-        lambda *_args, **_kwargs: TraceResult(
-            (), (), (AucRecord(7, 10, "warm", "COAD", "STAD", 0.5, 0.5, 0, False),)
-        ),
-    )
-
-    result = run_confirmatory_test(
-        source, target, predictions, draw_ids=(7,), n_permutations=2, n_jobs=1
-    )
-
-    assert result.n_permutations == 2
-    assert result.p_value == pytest.approx(1 / 3)
-
-
-def test_inference_writer_assigns_a_p_value_only_to_the_confirmatory_cell(
-    tmp_path: Path,
-) -> None:
-    base = estimate_few_label_cell(_cell_predictions(), "SOURCE", "TARGET", 10, seed=23)
-    confirmatory_cell = replace(
-        base,
-        source="COAD",
-        target="STAD",
-        confirmatory=True,
-    )
-    exploratory_cell = replace(
-        base,
-        source="UCEC",
-        target="STAD",
-        confirmatory=False,
-    )
-    confirmatory = ConfirmatoryResult(0.5, 0.01, True, 999, np.zeros(999))
-
-    write_registered_inference(
-        FewLabelInference((confirmatory_cell, exploratory_cell), ()), confirmatory, tmp_path
-    )
-
-    with (tmp_path / "few_label_estimates.csv").open(newline="") as handle:
-        rows = tuple(csv.DictReader(handle))
-    assert [row["permutation_p"] for row in rows] == ["0.01", ""]
-    with (tmp_path / "few_label_permutation_null.csv").open(newline="") as handle:
-        assert len(tuple(csv.DictReader(handle))) == 999
 
 
 def test_matrix_inference_derives_equivalence_from_stored_predictions() -> None:
