@@ -1,7 +1,7 @@
 {
   "code": {
-    "commit": "e53a066a7841428ba685c2f07585b969873986da",
-    "sha256": "b008dc0bf2f8f827389313a347e26755a67e40600f197f62d012703971a6a7d8"
+    "commit": "5a3688c5dce8f5ac887999a010ea224af44cd0bb",
+    "sha256": "e864f0a620bcdb06d47557fd769f05d0a8f3ef70b531cd4b1dc5eb95d7b8d361"
   },
   "cohorts": {
     "COAD": {
@@ -25,6 +25,15 @@
   },
   "configuration": {
     "bootstrap_replicates": 2000,
+    "confirmatory": {
+      "cell": {
+        "base": "single",
+        "k": 10,
+        "source": "COAD",
+        "target": "STAD"
+      },
+      "rule": "paired stratified patient-bootstrap 95% interval on the lift excludes zero"
+    },
     "draw_ids": [
       0,
       1,
@@ -48,8 +57,6 @@
       19
     ],
     "pairs": "registered_full_matrix",
-    "permutation_chunk_size": 50,
-    "permutations": 999,
     "rungs": [
       0,
       3,
@@ -82,11 +89,29 @@
         17,
         18,
         19
-      ],
-      "permutation": 0
+      ]
     }
   },
-  "elapsed_seconds": 1332.4814951659646,
+  "elapsed_seconds": 859.9639759981073,
+  "environment": {
+    "blas": [
+      {
+        "architecture": "Prescott",
+        "library": "openblas",
+        "version": "0.3.23.dev"
+      },
+      {
+        "architecture": "SkylakeX",
+        "library": "openblas",
+        "version": "0.3.30"
+      }
+    ],
+    "cpu": "INTEL(R) XEON(R) PLATINUM 8570",
+    "hostname": "dlc-slowpoke",
+    "numpy": "1.26.4",
+    "python": "3.11.15",
+    "scikit_learn": "1.7.2"
+  },
   "features": {
     "extractor": "PRISM",
     "hashes": {
@@ -96,16 +121,10 @@
     }
   },
   "model": {
-    "grid": {
-      "C": [
-        1.0
-      ],
-      "class_weight": [
-        "balanced"
-      ],
-      "max_iter": [
-        2000
-      ]
+    "hyperparameters": {
+      "C": 1.0,
+      "class_weight": "balanced",
+      "max_iter": 2000
     },
     "type": "StandardScaler+LogisticRegression"
   },
@@ -115,7 +134,7 @@
     "threads_per_worker": 1,
     "workers": 8
   },
-  "schema_version": "panmorph.few-label.bundle/v1",
+  "schema_version": "panmorph.few-label.bundle/v2",
   "splitter": {
     "folds": 5,
     "groups": "tissue_source_site",
