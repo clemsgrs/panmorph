@@ -25,3 +25,22 @@ def test_gate_bootstrap_interval_uses_the_shared_stratified_schedule() -> None:
     assert np.array_equal(stats, bootstrap_auc(labels, scores, schedule))
     assert np.all(np.sum(labels[schedule] == 1, axis=1) == 3)
     assert 0.0 <= lower <= upper <= 1.0
+
+
+def test_probe_fit_is_independent_of_the_outer_blas_thread_count() -> None:
+    import numpy as np
+    from threadpoolctl import threadpool_limits
+
+    from panmorph.probe import fit_predict
+
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(120, 64)).astype(np.float32)
+    y = (X[:, 0] + 0.5 * rng.normal(size=120) > 0).astype(int)
+    Xte = rng.normal(size=(30, 64)).astype(np.float32)
+
+    with threadpool_limits(limits=1):
+        single = fit_predict(X, y, Xte)
+    with threadpool_limits(limits=8):
+        many = fit_predict(X, y, Xte)
+
+    assert np.array_equal(single, many)
