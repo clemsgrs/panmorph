@@ -62,6 +62,9 @@ def test_quick_runner_emits_complete_non_reportable_bundle(tmp_path: Path) -> No
     assert manifest["configuration"]["confirmatory"]["cell"] == {
         "source": "COAD", "target": "STAD", "base": "single", "k": 10,
     }
+    assert set(manifest["environment"]) == {
+        "hostname", "cpu", "python", "numpy", "scikit_learn", "blas",
+    }
     assert manifest["model"]["hyperparameters"] == {
         "C": 1.0, "class_weight": "balanced", "max_iter": 2000,
     }
