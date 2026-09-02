@@ -22,8 +22,9 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 from .data import Cohort, MSI_COHORTS, load_cohort
 from .few_label import (
+    CONFIRMATORY_CELL,
+    CONFIRMATORY_RULE,
     AucRecord,
-    ConfirmatoryResult,
     DrawRecord,
     FewLabelInference,
     PredictionRecord,
@@ -32,13 +33,9 @@ from .few_label import (
     _pool_cohorts,
     _foreign_cohorts,
     _restore_pooled_provenance,
-    confirmatory_observed,
-    empirical_superiority_p,
-    evaluate_confirmatory_null,
     estimate_few_label_matrix,
     preflight_rungs,
     sample_rung,
-    source_label_permutations,
     summarize_predictions,
     trace_paired_cell,
     validate_zero_shot_anchors,
@@ -50,7 +47,7 @@ from .few_label_plot import (
     build_few_label_plot_spec,
 )
 
-BUNDLE_SCHEMA_VERSION = "panmorph.few-label.bundle/v1"
+BUNDLE_SCHEMA_VERSION = "panmorph.few-label.bundle/v2"
 DEFAULT_WORKERS = 8
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -64,19 +61,17 @@ class FewLabelProfile:
     rungs: tuple[Rung, ...]
     draw_ids: tuple[int, ...]
     bootstrap_replicates: int
-    permutations: int
-    permutation_chunk_size: int
 
 
 PROFILES = {
     "quick": FewLabelProfile(
         "quick", False, ("COAD", "STAD"),
         (("COAD", "STAD"), ("STAD", "COAD")),
-        (0, 10, "all"), (0,), 50, 9, 3,
+        (0, 10, "all"), (0,), 50,
     ),
     "full": FewLabelProfile(
         "full", True, ("COAD", "UCEC", "STAD"), None,
-        (0, 3, 5, 10, 25, 40, "all"), tuple(range(20)), 2_000, 999, 50,
+        (0, 3, 5, 10, 25, 40, "all"), tuple(range(20)), 2_000,
     ),
 }
 
@@ -91,14 +86,14 @@ COHORT_CASE_FIELDS = ("cohort", "case_id", "label", "site")
 SOURCE_BASE_FIELDS = ("source", "target", "cohort")
 AUC_FIELDS = (
     "experiment", "source", "target", "base", "arm", "k", "draw_seed",
-    "auc", "rank_auc", "rank_gap", "rank_diverged",
+    "auc", "fold_auc", "fold_gap", "fold_diverged",
 )
 SUMMARY_FIELDS = (
     "source", "target", "base", "k", "n_draws", "warm_auc",
     "warm_ci_lower", "warm_ci_upper", "cold_auc", "cold_ci_lower",
     "cold_ci_upper", "lift", "lift_ci_lower", "lift_ci_upper",
-    "rank_warm_auc", "rank_cold_auc", "rank_lift", "rank_diverged",
-    "confirmatory", "permutation_p",
+    "fold_warm_auc", "fold_cold_auc", "fold_lift", "fold_diverged",
+    "confirmatory", "confirmatory_passed",
 )
 EQUIVALENCE_FIELDS = (
     "source", "target", "base", "local_positive_equivalence",
@@ -108,11 +103,10 @@ EQUIVALENCE_FIELDS = (
     "average_point_censored", "average_ci_lower_censored",
     "average_ci_upper_censored",
 )
-NULL_FIELDS = ("permutation", "null_mean_lift")
 REQUIRED_ARTIFACTS = (
     "manifest.json", "few_label_draws.csv", "few_label_folds.csv", "few_label_cohort_cases.csv",
     "few_label_source_bases.csv", "few_label_predictions.csv", "few_label_aucs.csv",
-    "few_label_summaries.csv", "few_label_equivalence.csv", "few_label_confirmatory_null.csv",
+    "few_label_summaries.csv", "few_label_equivalence.csv",
     "few_label_value.png", "few_label_value.pdf", "few_label_lift.png", "few_label_lift.pdf",
 )
 
@@ -174,7 +168,7 @@ def _manifest(profile: FewLabelProfile, cohorts: Mapping[str, Cohort], workers: 
         "cohorts": {name: _cohort_identity(cohorts[name]) for name in profile.cohorts},
         "model": {
             "type": "StandardScaler+LogisticRegression",
-            "grid": {"C": [1.0], "class_weight": ["balanced"], "max_iter": [2000]},
+            "hyperparameters": {"C": 1.0, "class_weight": "balanced", "max_iter": 2000},
         },
         "splitter": {"type": "GroupKFold", "groups": "tissue_source_site", "folds": 5},
         "configuration": {
@@ -182,9 +176,14 @@ def _manifest(profile: FewLabelProfile, cohorts: Mapping[str, Cohort], workers: 
             "rungs": list(profile.rungs),
             "draw_ids": list(profile.draw_ids),
             "bootstrap_replicates": profile.bootstrap_replicates,
-            "permutations": profile.permutations,
-            "permutation_chunk_size": profile.permutation_chunk_size,
-            "seeds": {"draws": list(profile.draw_ids), "bootstrap": 0, "permutation": 0},
+            "seeds": {"draws": list(profile.draw_ids), "bootstrap": 0},
+            "confirmatory": {
+                "cell": {
+                    "source": CONFIRMATORY_CELL[0], "target": CONFIRMATORY_CELL[1],
+                    "base": CONFIRMATORY_CELL[2], "k": CONFIRMATORY_CELL[3],
+                },
+                "rule": CONFIRMATORY_RULE,
+            },
         },
         "resources": {"workers": workers, "threads_per_worker": 1},
         "elapsed_seconds": None,
@@ -276,8 +275,8 @@ def _bundle_prediction_records(out: Path) -> tuple[PredictionRecord, ...]:
 def _auc_record(row: Mapping[str, str]) -> AucRecord:
     return AucRecord(
         _optional_int(row["draw_seed"]), _rung(row["k"]), row["arm"], row["source"],
-        row["target"], float(row["raw_auc"]), float(row["rank_auc"]),
-        float(row["rank_gap"]), row["rank_diverged"] == "True",
+        row["target"], float(row["raw_auc"]), float(row["fold_auc"]),
+        float(row["fold_gap"]), row["fold_diverged"] == "True",
     )
 
 
@@ -363,7 +362,7 @@ def _load_cell(
         ) != expected_key
         or not all(
             np.isfinite(value)
-            for value in (aucs[0].raw_auc, aucs[0].rank_auc, aucs[0].rank_gap)
+            for value in (aucs[0].raw_auc, aucs[0].fold_auc, aucs[0].fold_gap)
         )
     ):
         return None
@@ -463,42 +462,6 @@ def _run_cells(out: Path, profile: FewLabelProfile, cohorts: Mapping[str, Cohort
     )
 
 
-def _run_permutations(out, profile, cohorts, predictions, workers) -> ConfirmatoryResult:
-    observed, cold_by_draw = confirmatory_observed(predictions, profile.draw_ids)
-    schedules = source_label_permutations(
-        cohorts["COAD"].y, "COAD", seed=0, n_permutations=profile.permutations
-    )
-    checkpoint_root = out / "checkpoints" / "permutations"
-    checkpoint_root.mkdir(parents=True, exist_ok=True)
-    null = np.empty(profile.permutations, dtype=float)
-    for start in range(0, profile.permutations, profile.permutation_chunk_size):
-        stop = min(start + profile.permutation_chunk_size, profile.permutations)
-        path = checkpoint_root / f"{start:04d}-{stop:04d}.csv"
-        cached = None
-        if path.exists():
-            try:
-                rows = _read_csv(path, NULL_FIELDS)
-                if [int(row["permutation"]) for row in rows] == list(range(start, stop)):
-                    cached = np.asarray([float(row["null_mean_lift"]) for row in rows])
-                    if not np.all(np.isfinite(cached)):
-                        cached = None
-            except (ValueError, KeyError):
-                pass
-        if cached is None:
-            with parallel_config(backend="loky", inner_max_num_threads=1):
-                cached = evaluate_confirmatory_null(
-                    cohorts["COAD"], cohorts["STAD"], schedules[start:stop],
-                    cold_by_draw, draw_ids=profile.draw_ids, n_jobs=workers,
-                )
-            _write_csv(path, NULL_FIELDS, (
-                {"permutation": index, "null_mean_lift": value}
-                for index, value in zip(range(start, stop), cached)
-            ))
-        null[start:stop] = cached
-    p_value = empirical_superiority_p(observed, null)
-    return ConfirmatoryResult(observed, p_value, p_value < 0.05, len(null), null)
-
-
 def _base(record: AucRecord) -> str:
     return "target-only" if record.arm == "cold" else "pooled" if "+" in record.source else "single"
 
@@ -545,7 +508,6 @@ def _write_derived_tables(
     out: Path,
     predictions: tuple[PredictionRecord, ...],
     inference: FewLabelInference,
-    confirmatory: ConfirmatoryResult,
 ) -> None:
     aucs = summarize_predictions(predictions)
     _write_csv(out / "few_label_aucs.csv", AUC_FIELDS, (
@@ -553,8 +515,8 @@ def _write_derived_tables(
             "experiment": "few-label", "source": row.source, "target": row.target,
             "base": _base(row), "arm": row.arm, "k": row.k,
             "draw_seed": row.draw_seed, "auc": row.raw_auc,
-            "rank_auc": row.rank_auc, "rank_gap": row.rank_gap,
-            "rank_diverged": row.rank_diverged,
+            "fold_auc": row.fold_auc, "fold_gap": row.fold_gap,
+            "fold_diverged": row.fold_diverged,
         }
         for row in aucs
     ))
@@ -566,10 +528,10 @@ def _write_derived_tables(
             "cold_auc": cell.cold.point, "cold_ci_lower": cell.cold.lower,
             "cold_ci_upper": cell.cold.upper, "lift": cell.lift.point,
             "lift_ci_lower": cell.lift.lower, "lift_ci_upper": cell.lift.upper,
-            "rank_warm_auc": cell.rank_warm, "rank_cold_auc": cell.rank_cold,
-            "rank_lift": cell.rank_lift, "rank_diverged": cell.rank_diverged,
+            "fold_warm_auc": cell.fold_warm, "fold_cold_auc": cell.fold_cold,
+            "fold_lift": cell.fold_lift, "fold_diverged": cell.fold_diverged,
             "confirmatory": cell.confirmatory,
-            "permutation_p": confirmatory.p_value if cell.confirmatory else "",
+            "confirmatory_passed": "" if cell.passed is None else cell.passed,
         }
         for cell in inference.cells
     ))
@@ -591,13 +553,9 @@ def _write_derived_tables(
         }
         for cell in inference.equivalences
     ))
-    _write_csv(out / "few_label_confirmatory_null.csv", NULL_FIELDS, (
-        {"permutation": index, "null_mean_lift": value}
-        for index, value in enumerate(confirmatory.null_lifts)
-    ))
 
 
-def _derive_reports(out: Path) -> tuple[tuple[PredictionRecord, ...], FewLabelInference, ConfirmatoryResult]:
+def _derive_reports(out: Path) -> tuple[tuple[PredictionRecord, ...], FewLabelInference]:
     manifest = json.loads((out / "manifest.json").read_text())
     predictions = _bundle_prediction_records(out)
     draw_ids = tuple(int(value) for value in manifest["configuration"]["draw_ids"])
@@ -612,30 +570,22 @@ def _derive_reports(out: Path) -> tuple[tuple[PredictionRecord, ...], FewLabelIn
         draw_ids=draw_ids,
         n_bootstraps=int(manifest["configuration"]["bootstrap_replicates"]),
     )
-    null_rows = _read_csv(out / "few_label_confirmatory_null.csv", NULL_FIELDS)
-    null = np.asarray([float(row["null_mean_lift"]) for row in null_rows])
-    observed, _ = confirmatory_observed(predictions, draw_ids)
-    p_value = empirical_superiority_p(observed, null)
-    confirmatory = ConfirmatoryResult(
-        observed, p_value, p_value < 0.05, len(null), null
-    )
-    return predictions, inference, confirmatory
+    return predictions, inference
 
 
 def rebuild_few_label_reports(out: Path) -> None:
-    """Rebuild all derived CSV reports from stored predictions and null values."""
-    predictions, inference, confirmatory = _derive_reports(out)
-    _write_derived_tables(out, predictions, inference, confirmatory)
+    """Rebuild all derived CSV reports from stored predictions."""
+    predictions, inference = _derive_reports(out)
+    _write_derived_tables(out, predictions, inference)
 
 
 def _verify_report_reproducibility(out: Path) -> None:
-    predictions, inference, confirmatory = _derive_reports(out)
+    predictions, inference = _derive_reports(out)
     with tempfile.TemporaryDirectory(prefix="panmorph-few-label-validate-") as temporary:
         expected = Path(temporary)
-        _write_derived_tables(expected, predictions, inference, confirmatory)
+        _write_derived_tables(expected, predictions, inference)
         for name in (
             "few_label_aucs.csv", "few_label_summaries.csv", "few_label_equivalence.csv",
-            "few_label_confirmatory_null.csv",
         ):
             if (out / name).read_bytes() != (expected / name).read_bytes():
                 raise ValueError(f"stored {name} is not reproducible from bundle inputs")
@@ -671,7 +621,6 @@ def _validate_few_label_bundle(
     aucs = _read_csv(out / "few_label_aucs.csv", AUC_FIELDS)
     summaries = _read_csv(out / "few_label_summaries.csv", SUMMARY_FIELDS)
     _read_csv(out / "few_label_equivalence.csv", EQUIVALENCE_FIELDS)
-    null = _read_csv(out / "few_label_confirmatory_null.csv", NULL_FIELDS)
     prediction_keys = {
         (row["source"], row["target"], row["arm"], row["k"], row["draw_seed"])
         for row in predictions
@@ -863,9 +812,13 @@ def _validate_few_label_bundle(
     summary_cells = {(row["source"], row["target"], row["k"]) for row in summaries}
     if warm_cells != summary_cells:
         raise ValueError("AUC-to-summary join is incomplete")
-    expected_permutations = int(manifest["configuration"]["permutations"])
-    if [int(row["permutation"]) for row in null] != list(range(expected_permutations)):
-        raise ValueError("confirmatory null is incomplete or out of order")
+    confirmatory_rows = [row for row in summaries if row["confirmatory"] == "True"]
+    if len(confirmatory_rows) > 1 or any(
+        row["confirmatory_passed"] not in ("True", "False") for row in confirmatory_rows
+    ) or any(
+        row["confirmatory_passed"] != "" for row in summaries if row["confirmatory"] != "True"
+    ):
+        raise ValueError("confirmatory verdict is not confined to the registered cell")
     if not draws:
         raise ValueError("draw audit table is empty")
     if manifest.get("reportable"):
@@ -875,8 +828,8 @@ def _validate_few_label_bundle(
                     AucRecord(
                         _optional_int(row["draw_seed"]), _rung(row["k"]), row["arm"],
                         row["source"], row["target"], float(row["auc"]),
-                        float(row["rank_auc"]), float(row["rank_gap"]),
-                        row["rank_diverged"] == "True",
+                        float(row["fold_auc"]), float(row["fold_gap"]),
+                        row["fold_diverged"] == "True",
                     )
                     for row in aucs
                 ),
@@ -922,9 +875,12 @@ def render_few_label_figures(out: Path, *, validate: bool = True) -> None:
                   float(row["cold_ci_upper"])),
             lift=(float(row["lift"]), float(row["lift_ci_lower"]),
                   float(row["lift_ci_upper"])),
-            rank_diverged=row["rank_diverged"] == "True",
+            fold_diverged=row["fold_diverged"] == "True",
             confirmatory=row["confirmatory"] == "True",
-            permutation_p=optional_float(row["permutation_p"]),
+            passed=(
+                None if row["confirmatory_passed"] == ""
+                else row["confirmatory_passed"] == "True"
+            ),
         )
         for row in rows
     )
@@ -1059,6 +1015,24 @@ def _render_few_label_plot(
     plt.close(fig)
 
 
+class CompleteBundleError(ValueError):
+    """A complete bundle already occupies the output directory."""
+
+    def __init__(self, out: Path, manifest: Mapping[str, object]) -> None:
+        commit = str(manifest.get("code", {}).get("commit", "unknown"))
+        super().__init__(
+            f"{out} already holds a complete, valid {manifest.get('profile')} few-label "
+            f"bundle produced at commit {commit}; pass a new --out directory to re-run"
+        )
+        self.commit = commit
+
+
+def _resume_identity(manifest: Mapping[str, object]) -> dict[str, object]:
+    identity = _identity(manifest)
+    identity.pop("code")
+    return identity
+
+
 def run_few_label_bundle(
     out: Path,
     *,
@@ -1066,7 +1040,13 @@ def run_few_label_bundle(
     cohorts: Mapping[str, Cohort] | None = None,
     workers: int = DEFAULT_WORKERS,
 ) -> Path:
-    """Execute or safely resume few-label and return its validated bundle directory."""
+    """Execute or safely resume few-label and return its validated bundle directory.
+
+    A partial bundle is resumed only when its manifest identity, including the
+    code hash, matches the planned run. A complete bundle is never overwritten: it
+    is validated and ``CompleteBundleError`` names its commit so the caller can
+    choose a new output directory.
+    """
     if workers < 1:
         raise ValueError("workers must be positive")
     selected = PROFILES[profile]
@@ -1085,6 +1065,14 @@ def run_few_label_bundle(
     manifest_path = out / "manifest.json"
     if manifest_path.exists():
         existing = json.loads(manifest_path.read_text())
+        if existing.get("status") == "complete":
+            if _resume_identity(existing) != _resume_identity(planned):
+                raise ValueError(
+                    f"{out} holds a complete few-label bundle with a different "
+                    "configuration; pass a new --out directory"
+                )
+            validate_few_label_bundle(out, require_complete=True)
+            raise CompleteBundleError(out, existing)
         if _identity(existing) != _identity(planned):
             raise ValueError("incompatible few-label partial results: manifest identity differs")
     started = time.monotonic()
@@ -1094,11 +1082,6 @@ def run_few_label_bundle(
         with (ROOT / "results/gate_results.csv").open(newline="") as handle:
             validate_zero_shot_anchors(result.aucs, tuple(csv.DictReader(handle)))
     _write_raw_tables(out, result, loaded)
-    confirmatory = _run_permutations(out, selected, loaded, result.predictions, workers)
-    _write_csv(out / "few_label_confirmatory_null.csv", NULL_FIELDS, (
-        {"permutation": index, "null_mean_lift": value}
-        for index, value in enumerate(confirmatory.null_lifts)
-    ))
     rebuild_few_label_reports(out)
     validate_few_label_bundle(out)
     render_few_label_figures(out, validate=False)

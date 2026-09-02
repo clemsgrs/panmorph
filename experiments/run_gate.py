@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from itertools import permutations
 from pathlib import Path
 
 import numpy as np
@@ -29,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from panmorph.cv import random_oof, site_out_oof  # noqa: E402
 from panmorph.data import load_all, shared_sites  # noqa: E402
-from panmorph.metrics import bootstrap_auc_ci, permutation_null  # noqa: E402
+from panmorph.metrics import permutation_null, stratified_bootstrap_auc_ci  # noqa: E402
 from panmorph.probe import fit_predict  # noqa: E402
 from sklearn.metrics import roc_auc_score  # noqa: E402
 
@@ -51,7 +50,9 @@ def run_ceiling(cohorts, n_boot, seed):
         p_site, tpos = site_out_oof(c.X, c.y, c.sites)
         a_rand = roc_auc_score(c.y, p_rand)
         a_site = roc_auc_score(c.y, p_site)
-        lo_s, hi_s, _ = bootstrap_auc_ci(c.y, p_site, n_boot=n_boot, seed=seed)
+        lo_s, hi_s, _ = stratified_bootstrap_auc_ci(
+            c.y, p_site, key=(c.name,), n_boot=n_boot, seed=seed
+        )
         print(
             f"  {name}: random-CV={a_rand:.3f}  site-out={a_site:.3f} "
             f"[{lo_s:.3f},{hi_s:.3f}]  gap={a_rand - a_site:+.3f}  "
@@ -82,8 +83,9 @@ def run_zeroshot(cohorts, n_perm, n_boot, seed, n_jobs):
             obs, pval, _ = permutation_null(
                 cs.X, cs.y, Xt, yt, n_perm=n_perm, seed=seed, n_jobs=n_jobs
             )
-            lo, hi, _ = bootstrap_auc_ci(yt, fit_predict(cs.X, cs.y, Xt),
-                                         n_boot=n_boot, seed=seed)
+            lo, hi, _ = stratified_bootstrap_auc_ci(
+                yt, fit_predict(cs.X, cs.y, Xt), key=(tgt,), n_boot=n_boot, seed=seed
+            )
             role = "confirmatory" if (src, tgt) in CONFIRMATORY else "exploratory"
             passed = (lo > CI_LO_PASS) and (pval < P_PASS)
             flag = "  <== confirmatory" if role == "confirmatory" else ""
@@ -100,7 +102,9 @@ def run_zeroshot(cohorts, n_perm, n_boot, seed, n_jobs):
         Xs = np.concatenate([cohorts[o].X for o in others])
         ys = np.concatenate([cohorts[o].y for o in others])
         obs, pval, _ = permutation_null(Xs, ys, Xt, yt, n_perm=n_perm, seed=seed, n_jobs=n_jobs)
-        lo, hi, _ = bootstrap_auc_ci(yt, fit_predict(Xs, ys, Xt), n_boot=n_boot, seed=seed)
+        lo, hi, _ = stratified_bootstrap_auc_ci(
+            yt, fit_predict(Xs, ys, Xt), key=(tgt,), n_boot=n_boot, seed=seed
+        )
         label = "+".join(others)
         print(f"    {label} -> {tgt}:  AUC={obs:.3f} [{lo:.3f},{hi:.3f}]  "
               f"perm_p={pval:.4f}  (combined, exploratory)")
