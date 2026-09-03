@@ -17,6 +17,7 @@ cohorts, prints the banners, and writes the table.
 Run:
   python experiments/run_gate.py            # full: 1000 perms, 2000 bootstraps
   python experiments/run_gate.py --quick    # smoke test: 100 perms, 500 bootstraps
+  python experiments/run_gate.py --features prism2-base   # writes results/prism2-base/
 """
 from __future__ import annotations
 
@@ -26,26 +27,47 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from panmorph.data import load_all, shared_sites  # noqa: E402
-from panmorph.gate import banner, run_gate  # noqa: E402
+from panmorph.data import DEFAULT_FEATURE_SET, FEATURE_SETS, load_all, shared_sites  # noqa: E402
+from panmorph.gate import banner, results_dir, run_gate  # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser()
     ap.add_argument("--n-perm", type=int, default=1000)
     ap.add_argument("--n-boot", type=int, default=2000)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--n-jobs", type=int, default=-1)
     ap.add_argument("--quick", action="store_true", help="100 perms / 500 bootstraps")
-    ap.add_argument("--out", type=Path, default=Path(__file__).resolve().parent.parent / "results")
-    args = ap.parse_args()
+    ap.add_argument(
+        "--features", choices=sorted(FEATURE_SETS), default=DEFAULT_FEATURE_SET,
+        help="registered feature set to load",
+    )
+    ap.add_argument(
+        "--out", type=Path, default=None,
+        help="results directory (default: results/, or results/<features>/ for a non-default set)",
+    )
+    return ap
+
+
+def parse_args(argv: list[str] | None = None, root: Path = ROOT) -> argparse.Namespace:
+    args = build_parser().parse_args(argv)
     if args.quick:
         args.n_perm, args.n_boot = 100, 500
+    if args.out is None:
+        args.out = results_dir(args.features, root)
+    return args
+
+
+def main() -> None:
+    args = parse_args()
 
     args.out.mkdir(parents=True, exist_ok=True)
-    print(f"GATE run  | n_perm={args.n_perm}  n_boot={args.n_boot}  seed={args.seed}")
+    print(f"GATE run  | n_perm={args.n_perm}  n_boot={args.n_boot}  seed={args.seed}  "
+          f"features={args.features}")
 
-    cohorts = load_all()
+    cohorts = load_all(features=args.features)
     print(banner("DATA"))
     for name, c in cohorts.items():
         print(f"  {name}: n={c.n}  MSI+={c.n_pos} ({c.prevalence:.0%})  sites={c.n_sites}")
