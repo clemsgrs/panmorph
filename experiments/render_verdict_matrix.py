@@ -6,7 +6,7 @@ name is not special: the flags compare each feature set with ``--reference``
 
 Run:
   python experiments/render_verdict_matrix.py prism=results/gate_results.csv \\
-      uni=results/uni/gate_results.csv prism2=results/prism2/gate_results.csv
+      prism2-base=results/prism2-base/gate_results.csv prism2-diagnostic=results/prism2-diagnostic/gate_results.csv
 """
 from __future__ import annotations
 
