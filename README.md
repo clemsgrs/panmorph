@@ -66,6 +66,7 @@ python experiments/run_gate.py                       # zero-shot transfer matrix
 python experiments/run_few_label.py --profile quick  # fast smoke test; not reportable
 python experiments/run_few_label.py --profile full --out results/few-label-rerun  # complete analysis
 python experiments/run_site_probe.py                 # hospital-site diagnostic
+python experiments/render_verdict_matrix.py prism=results/gate_results.csv NAME=PATH ...  # feature-set comparison as Markdown
 python -m pytest                                      # deterministic test suite
 ```
 
