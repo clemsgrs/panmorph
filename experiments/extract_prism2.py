@@ -56,20 +56,31 @@ class HubApi(Protocol):
     def auth_check(self, repo_id: str) -> None: ...
 
 
-def check_prism2_access(api: HubApi | None = None) -> None:
-    """Stop early when the cached Hugging Face token cannot read PRISM2.
-
-    The Hub grants access to the repository as a whole, not to one revision.
-    """
+def hub_refusal_type() -> type[BaseException]:
+    """Return the error ``huggingface_hub`` raises when a token cannot read a repository."""
     from huggingface_hub.errors import HfHubHTTPError
 
+    return HfHubHTTPError
+
+
+def check_prism2_access(
+    api: HubApi | None = None, *, refusal: type[BaseException] | None = None
+) -> None:
+    """Stop early when the cached Hugging Face token cannot read PRISM2.
+
+    The Hub grants access to the repository as a whole, not to one revision. ``refusal``
+    is the error type the Hub raises for a refusal. Tests inject it with a fake ``api``
+    so that ``huggingface_hub`` is imported only on the real path.
+    """
     if api is None:
         from huggingface_hub import HfApi
 
         api = HfApi()
     try:
         api.auth_check(PRISM2_REPO)
-    except HfHubHTTPError as error:
+    except Exception as error:
+        if not isinstance(error, refusal or hub_refusal_type()):
+            raise
         raise AccessError(
             f"No access to the gated Hugging Face repository {PRISM2_REPO}. "
             "Request access on the model page and log in with `huggingface-cli login`. "

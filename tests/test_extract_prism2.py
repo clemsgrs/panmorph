@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -317,18 +318,42 @@ class FakeHubApi:
             raise self.error
 
 
-def test_access_check_asks_the_hub_about_the_prism2_repository() -> None:
+class FakeHubRefusal(Exception):
+    """Stand in for ``huggingface_hub.errors.HfHubHTTPError`` without the package."""
+
+
+@pytest.fixture
+def without_huggingface_hub(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every ``import huggingface_hub`` fail, as it does in CI."""
+    for name in list(sys.modules):
+        if name == "huggingface_hub" or name.startswith("huggingface_hub."):
+            monkeypatch.delitem(sys.modules, name)
+    monkeypatch.setitem(sys.modules, "huggingface_hub", None)
+
+
+def test_access_check_asks_the_hub_about_the_prism2_repository(
+    without_huggingface_hub: None,
+) -> None:
     api = FakeHubApi()
 
-    check_prism2_access(api=api)
+    check_prism2_access(api=api, refusal=FakeHubRefusal)
 
     assert api.checked == ["paige-ai/Prism2"]
 
 
-def test_access_check_turns_a_hub_refusal_into_a_clear_error() -> None:
-    from huggingface_hub.errors import GatedRepoError
-
-    api = FakeHubApi(error=GatedRepoError("gated"))
+def test_access_check_turns_a_hub_refusal_into_a_clear_error(
+    without_huggingface_hub: None,
+) -> None:
+    api = FakeHubApi(error=FakeHubRefusal("gated"))
 
     with pytest.raises(AccessError, match="paige-ai/Prism2.*gated"):
-        check_prism2_access(api=api)
+        check_prism2_access(api=api, refusal=FakeHubRefusal)
+
+
+def test_access_check_lets_an_unrelated_failure_through_unchanged(
+    without_huggingface_hub: None,
+) -> None:
+    api = FakeHubApi(error=ConnectionError("offline"))
+
+    with pytest.raises(ConnectionError, match="offline"):
+        check_prism2_access(api=api, refusal=FakeHubRefusal)
