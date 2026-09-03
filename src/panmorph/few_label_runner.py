@@ -23,7 +23,7 @@ from joblib import Parallel, delayed, parallel_config
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from .data import Cohort, MSI_COHORTS, load_cohort
+from .data import DEFAULT_FEATURE_SET, Cohort, FeatureSet, feature_set, load_cohort
 from .few_label import (
     CONFIRMATORY_CELL,
     CONFIRMATORY_RULE,
@@ -43,6 +43,7 @@ from .few_label import (
     trace_paired_cell,
     validate_zero_shot_anchors,
 )
+from .gate import results_dir
 from .few_label_plot import (
     FewLabelEquivalenceMark,
     FewLabelPlotCell,
@@ -184,18 +185,31 @@ def _cohort_identity(cohort: Cohort) -> dict[str, object]:
     }
 
 
-def _manifest(profile: FewLabelProfile, cohorts: Mapping[str, Cohort], workers: int) -> dict:
-    feature_hashes = {
-        name: MSI_COHORTS[name][2].parent.name
-        for name in profile.cohorts if name in MSI_COHORTS
+def _features_block(profile: FewLabelProfile, features: FeatureSet) -> dict[str, object]:
+    return {
+        "name": features.name,
+        "extractor": features.extractor,
+        "width": features.width,
+        "hashes": {
+            name: features.identities[name]
+            for name in profile.cohorts if name in features.identities
+        },
     }
+
+
+def _manifest(
+    profile: FewLabelProfile,
+    cohorts: Mapping[str, Cohort],
+    workers: int,
+    features: FeatureSet,
+) -> dict:
     return {
         "schema_version": BUNDLE_SCHEMA_VERSION,
         "profile": profile.name,
         "reportable": profile.reportable,
         "status": "running",
         "code": _code_identity(),
-        "features": {"extractor": "PRISM", "hashes": feature_hashes},
+        "features": _features_block(profile, features),
         "cohorts": {name: _cohort_identity(cohorts[name]) for name in profile.cohorts},
         "model": {
             "type": "StandardScaler+LogisticRegression",
@@ -222,6 +236,29 @@ def _manifest(profile: FewLabelProfile, cohorts: Mapping[str, Cohort], workers: 
     }
 
 
+def _features_identity(block: Mapping[str, object]) -> dict[str, object]:
+    """A features block written before the registry existed names the PRISM set.
+
+    Such a block holds only the extractor and the directory hashes; its name and
+    width are those of the registered default, so the committed bundle keeps its
+    identity.
+    """
+    if "name" in block:
+        return dict(block)
+    default = feature_set(DEFAULT_FEATURE_SET)
+    if block.get("extractor") != default.extractor:
+        raise ValueError(
+            f"features block names extractor {block.get('extractor')!r} without a "
+            f"feature-set name; only {default.extractor!r} is implied"
+        )
+    return {"name": default.name, "width": default.width, **block}
+
+
+def _gate_table(features: str) -> Path:
+    """The gate table a reportable bundle's zero-shot anchors are checked against."""
+    return results_dir(features, ROOT) / "gate_results.csv"
+
+
 def _identity(manifest: Mapping[str, object]) -> dict[str, object]:
     identity = {
         key: manifest[key]
@@ -230,6 +267,7 @@ def _identity(manifest: Mapping[str, object]) -> dict[str, object]:
             "model", "splitter", "configuration",
         )
     }
+    identity["features"] = _features_identity(manifest["features"])
     return json.loads(json.dumps(identity, sort_keys=True))
 
 
@@ -854,7 +892,8 @@ def _validate_few_label_bundle(
     if not draws:
         raise ValueError("draw audit table is empty")
     if manifest.get("reportable"):
-        with (ROOT / "results/gate_results.csv").open(newline="") as handle:
+        features_name = str(_features_identity(manifest["features"])["name"])
+        with _gate_table(features_name).open(newline="") as handle:
             validate_zero_shot_anchors(
                 tuple(
                     AucRecord(
@@ -1071,19 +1110,23 @@ def run_few_label_bundle(
     profile: Literal["quick", "full"] = "full",
     cohorts: Mapping[str, Cohort] | None = None,
     workers: int = DEFAULT_WORKERS,
+    features: str = DEFAULT_FEATURE_SET,
 ) -> Path:
     """Execute or safely resume few-label and return its validated bundle directory.
 
-    A partial bundle is resumed only when its manifest identity, including the
-    code hash, matches the planned run. A complete bundle is never overwritten: it
-    is validated and ``CompleteBundleError`` names its commit so the caller can
+    ``features`` names the registered feature set; it is loaded when ``cohorts`` is
+    not injected and is always recorded in the manifest identity. A partial bundle
+    is resumed only when its manifest identity, including the code hash and the
+    feature set, matches the planned run. A complete bundle is never overwritten:
+    it is validated and ``CompleteBundleError`` names its commit so the caller can
     choose a new output directory.
     """
     if workers < 1:
         raise ValueError("workers must be positive")
     selected = PROFILES[profile]
+    selected_features = feature_set(features)
     loaded = (
-        {name: load_cohort(name) for name in selected.cohorts}
+        {name: load_cohort(name, features=features) for name in selected.cohorts}
         if cohorts is None else dict(cohorts)
     )
     missing = set(selected.cohorts) - loaded.keys()
@@ -1092,7 +1135,7 @@ def run_few_label_bundle(
     loaded = {name: loaded[name] for name in selected.cohorts}
     for target in loaded.values():
         preflight_rungs(target, selected.rungs)
-    planned = _manifest(selected, loaded, workers)
+    planned = _manifest(selected, loaded, workers, selected_features)
     out.mkdir(parents=True, exist_ok=True)
     manifest_path = out / "manifest.json"
     if manifest_path.exists():
@@ -1111,7 +1154,7 @@ def run_few_label_bundle(
     _write_json(manifest_path, planned)
     result = _run_cells(out, selected, loaded, workers)
     if selected.reportable:
-        with (ROOT / "results/gate_results.csv").open(newline="") as handle:
+        with _gate_table(features).open(newline="") as handle:
             validate_zero_shot_anchors(result.aucs, tuple(csv.DictReader(handle)))
     _write_raw_tables(out, result, loaded)
     rebuild_few_label_reports(out)

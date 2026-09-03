@@ -69,9 +69,11 @@ def test_quick_runner_emits_complete_non_reportable_bundle(tmp_path: Path) -> No
         "C": 1.0, "class_weight": "balanced", "max_iter": 2000,
     }
     assert manifest["resources"]["workers"] == 1
-    assert manifest["features"]["hashes"] == {
-        "COAD": "lxbzb8rd",
-        "STAD": "oowdp902",
+    assert manifest["features"] == {
+        "name": "prism",
+        "extractor": "PRISM",
+        "width": 1280,
+        "hashes": {"COAD": "lxbzb8rd", "STAD": "oowdp902"},
     }
 
     expected = {
@@ -267,6 +269,67 @@ def test_resume_refuses_changed_data_identity(tmp_path: Path) -> None:
     _mark_partial(out)
     with pytest.raises(ValueError, match="incompatible few-label partial results"):
         run_few_label_bundle(out, profile="quick", cohorts=changed, workers=1)
+
+
+def test_manifest_records_a_named_feature_set_and_its_directory_identities(
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "bundle"
+
+    run_few_label_bundle(
+        out, profile="quick", cohorts=_quick_cohorts(), workers=1, features="prism2-base"
+    )
+
+    manifest = json.loads((out / "manifest.json").read_text())
+    assert manifest["features"] == {
+        "name": "prism2-base",
+        "extractor": "PRISM2",
+        "width": 2560,
+        "hashes": {"COAD": "prism2-base/COAD", "STAD": "prism2-base/STAD"},
+    }
+
+
+def test_partial_bundle_refuses_to_resume_under_another_feature_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = tmp_path / "bundle"
+    cohorts = _quick_cohorts()
+    run_few_label_bundle(out, profile="quick", cohorts=cohorts, workers=1)
+
+    with pytest.raises(ValueError, match="different configuration; pass a new --out"):
+        run_few_label_bundle(
+            out, profile="quick", cohorts=cohorts, workers=1, features="prism2-base"
+        )
+
+    _mark_partial(out)
+
+    def unexpected_execution(*_args, **_kwargs):
+        raise AssertionError("a partial bundle was resumed under another feature set")
+
+    monkeypatch.setattr(runner_module, "trace_paired_cell", unexpected_execution)
+    with pytest.raises(ValueError, match="incompatible few-label partial results"):
+        run_few_label_bundle(
+            out, profile="quick", cohorts=cohorts, workers=1, features="prism2-diagnostic"
+        )
+
+
+def test_a_manifest_written_before_the_registry_is_the_prism_feature_set(
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "bundle"
+    cohorts = _quick_cohorts()
+    run_few_label_bundle(out, profile="quick", cohorts=cohorts, workers=1)
+    manifest_path = out / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["features"] = {"extractor": "PRISM", "hashes": manifest["features"]["hashes"]}
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+    with pytest.raises(CompleteBundleError):
+        run_few_label_bundle(out, profile="quick", cohorts=cohorts, workers=1)
+    with pytest.raises(ValueError, match="different configuration; pass a new --out"):
+        run_few_label_bundle(
+            out, profile="quick", cohorts=cohorts, workers=1, features="prism2-base"
+        )
 
 
 def test_parallel_worker_count_does_not_change_result_tables(tmp_path: Path) -> None:

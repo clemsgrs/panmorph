@@ -52,7 +52,7 @@ def test_pass_rule_needs_lower_bound_above_060_and_p_below_005() -> None:
 def test_script_writes_the_module_table(tmp_path: Path, monkeypatch, capsys) -> None:
     script = _load_script()
     cohorts = _synthetic_cohorts()
-    monkeypatch.setattr(script, "load_all", lambda: cohorts)
+    monkeypatch.setattr(script, "load_all", lambda **_kwargs: cohorts)
     monkeypatch.setattr(
         sys, "argv",
         ["run_gate.py", "--n-perm", "20", "--n-boot", "20", "--n-jobs", "1",
@@ -69,6 +69,56 @@ def test_script_writes_the_module_table(tmp_path: Path, monkeypatch, capsys) -> 
     assert "ZERO-SHOT TRANSFER" in out
     assert "VERDICT" in out
     assert ">>> STRONG PASS" in out
+
+
+def test_results_directory_is_per_feature_set_except_for_the_default() -> None:
+    from panmorph.gate import results_dir
+
+    assert results_dir("prism", Path("/repo")) == Path("/repo/results")
+    assert results_dir("prism2-diagnostic", Path("/repo")) == Path("/repo/results/prism2-diagnostic")
+
+
+def test_script_writes_the_default_feature_set_to_the_results_root() -> None:
+    args = _load_script().parse_args([], root=Path("/repo"))
+
+    assert args.features == "prism"
+    assert args.out == Path("/repo/results")
+
+
+def test_script_writes_a_named_feature_set_to_its_own_results_directory() -> None:
+    args = _load_script().parse_args(["--features", "prism2-base"], root=Path("/repo"))
+
+    assert args.features == "prism2-base"
+    assert args.out == Path("/repo/results/prism2-base")
+
+
+def test_script_keeps_an_explicit_out_for_a_named_feature_set() -> None:
+    args = _load_script().parse_args(
+        ["--features", "prism2-diagnostic", "--out", "/elsewhere"], root=Path("/repo")
+    )
+
+    assert args.out == Path("/elsewhere")
+
+
+def test_script_loads_the_requested_feature_set(tmp_path: Path, monkeypatch) -> None:
+    script = _load_script()
+    requested = []
+
+    def fake_load_all(features="prism"):
+        requested.append(features)
+        return _synthetic_cohorts()
+
+    monkeypatch.setattr(script, "load_all", fake_load_all)
+    monkeypatch.setattr(
+        sys, "argv",
+        ["run_gate.py", "--n-perm", "20", "--n-boot", "20", "--n-jobs", "1",
+         "--features", "prism2-base", "--out", str(tmp_path)],
+    )
+
+    script.main()
+
+    assert requested == ["prism2-base"]
+    assert (tmp_path / "gate_results.csv").is_file()
 
 
 def _load_script():

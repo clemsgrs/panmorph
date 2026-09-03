@@ -69,6 +69,12 @@ python experiments/run_site_probe.py                 # hospital-site diagnostic
 python -m pytest                                      # deterministic test suite
 ```
 
+Both runners read the PRISM features by default. The option `--features` selects a
+registered feature set: `prism` (default, width 1280), `prism2-base` (width 2560), or
+`prism2-diagnostic` (width 3072). The gate writes the table of a named set to
+`results/<set>/`. The few-label manifest records the feature-set name, extractor, width,
+and directory identities. A partial bundle does not resume under a different feature set.
+
 The complete few-label run is resumable and writes a validated result bundle to
 `results/few-label/`. Its manifest records the data, model, split, seeds, inference
 settings, and the numerical environment of the run. A complete bundle is never

@@ -22,15 +22,17 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from panmorph.data import MSI_COHORTS, ROOT as MUTATION_ROOT  # noqa: E402
+from panmorph.data import (  # noqa: E402
+    FEATURES_ROOT as DEFAULT_FEATURES_ROOT,
+    MSI_COHORTS,
+    PRISM2_WIDTHS as VARIANTS,
+    prism2_feature_set,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_FEATURES_ROOT = MUTATION_ROOT / "features"
 MIN_SOMA_VERSION = (1, 13, 0)
 
 DATASET_COLUMNS = ["sample_id", "image_path", "label", "mask_path"]
-# Output variant -> embedding width.
-VARIANTS: dict[str, int] = {"base": 2560, "diagnostic": 3072}
 PRISM2_REPO = "paige-ai/Prism2"
 PRISM2_REVISION = "450352d0ddc6b42b21ce20794ce0fbefe6b5a47a"
 TILE_ENCODER = "virchow2"
@@ -111,8 +113,8 @@ def verify_features(directory: Path, case_ids: Sequence[str], *, width: int) -> 
 
 
 def feature_set_dir(features_root: Path, variant: str, cohort: str) -> Path:
-    """Return the directory that holds one variant's files for one cohort."""
-    return features_root / f"prism2-{variant}" / cohort
+    """Return the directory the registered feature set reads for one cohort."""
+    return prism2_feature_set(variant, features_root).dirs[cohort]
 
 
 def mirror_features(feature_dir: Path, destination: Path, case_ids: Sequence[str]) -> None:

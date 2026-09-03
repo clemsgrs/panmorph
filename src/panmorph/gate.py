@@ -14,6 +14,7 @@ Verdict is anchored on the confirmatory COAD<->STAD pair:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Mapping
 
 import numpy as np
@@ -21,15 +22,26 @@ import pandas as pd
 from sklearn.metrics import roc_auc_score
 
 from .cv import random_oof, site_out_oof
-from .data import Cohort
+from .data import DEFAULT_FEATURE_SET, Cohort
 from .metrics import permutation_null, stratified_bootstrap_auc_ci
 from .probe import fit_predict
 
 CI_LO_PASS = 0.60
 P_PASS = 0.05
 CONFIRMATORY = {("COAD", "STAD"), ("STAD", "COAD")}
+ROOT = Path(__file__).resolve().parents[2]
 
 Logger = Callable[[str], None]
+
+
+def results_dir(features: str, root: Path = ROOT) -> Path:
+    """Where the gate table for one feature set lives.
+
+    The default set writes to ``results/``, as it always has; a named set writes
+    to ``results/<features>/`` so its table never overwrites the committed one.
+    """
+    results = root / "results"
+    return results if features == DEFAULT_FEATURE_SET else results / features
 
 
 def _silent(_: str) -> None:
