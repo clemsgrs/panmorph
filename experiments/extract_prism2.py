@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Callable, Mapping, Sequence
+from typing import Callable, Mapping, NamedTuple, Protocol, Sequence
 
 import pandas as pd
 import torch
@@ -49,27 +50,43 @@ class IntegrityError(RuntimeError):
     """The mirrored feature directory does not match the labelled case list."""
 
 
-def check_prism2_access(api=None) -> None:
-    """Stop early when the cached Hugging Face token cannot read PRISM2."""
+class HubApi(Protocol):
+    """The one call this script makes on ``huggingface_hub.HfApi``."""
+
+    def auth_check(self, repo_id: str) -> None: ...
+
+
+def check_prism2_access(api: HubApi | None = None) -> None:
+    """Stop early when the cached Hugging Face token cannot read PRISM2.
+
+    The Hub grants access to the repository as a whole, not to one revision.
+    """
+    from huggingface_hub.errors import HfHubHTTPError
+
     if api is None:
         from huggingface_hub import HfApi
 
         api = HfApi()
     try:
-        api.auth_check(PRISM2_REPO, revision=PRISM2_REVISION)
-    except Exception as error:
+        api.auth_check(PRISM2_REPO)
+    except HfHubHTTPError as error:
         raise AccessError(
-            f"No access to the gated Hugging Face repository {PRISM2_REPO} "
-            f"(revision {PRISM2_REVISION}). Request access on the model page and log in "
-            f"with `huggingface-cli login`. Hub said: {error}"
+            f"No access to the gated Hugging Face repository {PRISM2_REPO}. "
+            "Request access on the model page and log in with `huggingface-cli login`. "
+            f"Hub said: {error}"
         ) from error
+
+
+def require_unique_case_ids(case_ids: Sequence[str], *, where: object) -> None:
+    """Refuse a case list that names one case twice."""
+    duplicates = sorted(case for case, count in Counter(case_ids).items() if count > 1)
+    if duplicates:
+        raise IntegrityError(f"{where}: duplicate case identifiers: {duplicates}")
 
 
 def verify_features(directory: Path, case_ids: Sequence[str], *, width: int) -> None:
     """Check one feature file per case with the expected embedding width."""
-    duplicates = sorted(case for case, count in Counter(case_ids).items() if count > 1)
-    if duplicates:
-        raise IntegrityError(f"{directory}: duplicate case identifiers: {duplicates}")
+    require_unique_case_ids(case_ids, where=directory)
     missing = sorted(case for case in case_ids if not (directory / f"{case}.pt").exists())
     if missing:
         raise IntegrityError(f"{directory}: missing feature files for cases: {missing}")
@@ -83,7 +100,7 @@ def verify_features(directory: Path, case_ids: Sequence[str], *, width: int) -> 
 
 
 def feature_set_dir(features_root: Path, variant: str, cohort: str) -> Path:
-    """Where one variant's per-case files for one cohort live, next to ``prism/``."""
+    """Return the directory that holds one variant's files for one cohort."""
     return features_root / f"prism2-{variant}" / cohort
 
 
@@ -125,7 +142,7 @@ def write_manifest(
 
 
 def is_complete(destination: Path, case_ids: Sequence[str], *, width: int) -> bool:
-    """True when a manifest is present and the mirrored files still pass the check."""
+    """Return True when a manifest exists and the mirrored files pass the check."""
     if not (destination / "manifest.json").exists():
         return False
     try:
@@ -133,6 +150,21 @@ def is_complete(destination: Path, case_ids: Sequence[str], *, width: int) -> bo
     except IntegrityError:
         return False
     return True
+
+
+def build_dataset_table(label_csv: Path, label_column: str) -> pd.DataFrame:
+    """Turn one label table into a soma dataset table with one row per labelled case."""
+    labels = pd.read_csv(label_csv).dropna(subset=[label_column])
+    require_unique_case_ids(labels["case_id"].astype(str).tolist(), where=label_csv)
+    return pd.DataFrame(
+        {
+            "sample_id": labels["case_id"].astype(str).tolist(),
+            "image_path": labels["wsi_path"].astype(str).tolist(),
+            "label": labels[label_column].astype(int).tolist(),
+            "mask_path": labels["mask_path"].astype(str).tolist(),
+        },
+        columns=DATASET_COLUMNS,
+    )
 
 
 def extract_prism2(
@@ -171,55 +203,61 @@ def extract_prism2(
             )
 
 
-def build_dataset_table(label_csv: Path, label_column: str) -> pd.DataFrame:
-    """Turn one label table into a soma dataset table with one row per labelled case."""
-    labels = pd.read_csv(label_csv).dropna(subset=[label_column])
-    return pd.DataFrame(
-        {
-            "sample_id": labels["case_id"].astype(str).tolist(),
-            "image_path": labels["wsi_path"].astype(str).tolist(),
-            "label": labels[label_column].astype(int).tolist(),
-            "mask_path": labels["mask_path"].astype(str).tolist(),
-        },
-        columns=DATASET_COLUMNS,
-    )
 
 
 def require_soma_version(version: str) -> None:
-    """Refuse a soma older than the release that fixed slide-level output variants."""
-    parts = tuple(int(part) for part in version.split("+")[0].split(".")[:3])
+    """Refuse a soma older than 1.13.0, the release that fixed slide-level variants."""
+    match = re.match(r"(\d+)\.(\d+)(?:\.(\d+))?", version)
+    parts = tuple(int(part or 0) for part in match.groups()) if match else (0, 0, 0)
     if parts < MIN_SOMA_VERSION:
         wanted = ".".join(str(part) for part in MIN_SOMA_VERSION)
         raise RuntimeError(
             f"soma {version} is too old; this script needs soma {wanted} or newer "
-            "(the release with the slide-level output-variant fix, clemsgrs/soma#454)."
+            "(the release with the slide-level variant fix, clemsgrs/soma#454)."
         )
 
 
-def collect_provenance() -> dict[str, str]:
-    """Read the soma commit and the soma and slide2vec versions from the environment."""
+def require_pinned_prism2_revision(found: str) -> None:
+    """Refuse a slide2vec that loads a PRISM2 revision other than the one in the manifest."""
+    if found != PRISM2_REVISION:
+        raise RuntimeError(
+            f"slide2vec loads {PRISM2_REPO} at revision {found}, but this script records "
+            f"{PRISM2_REVISION}. Update PRISM2_REVISION or pin slide2vec."
+        )
+
+
+class SomaBackend(NamedTuple):
+    """The real extractor and the provenance of the environment that runs it."""
+
+    extractor: Extractor
+    provenance: dict[str, str]
+
+
+def make_soma_backend(cache_root: Path) -> SomaBackend:
+    """Build the real extractor. All variants share ``cache_root``, so tiling runs once.
+
+    This is the only function that imports soma. Tests never call it.
+    """
     from importlib.metadata import version
 
     import soma
+    from soma.config import CacheConfig, EncoderConfig, ExecutionConfig, PreprocessingConfig
+    from soma.dataset import Dataset
+    from soma.extraction import FeatureExtractor
     from soma.provenance import soma_git_state
+    from slide2vec.encoders.models import prism2 as slide2vec_prism2
 
     require_soma_version(soma.__version__)
+    require_pinned_prism2_revision(slide2vec_prism2.PRISM2_REVISION)
     state = soma_git_state()
     commit = state.sha or "unknown"
     if state.dirty:
         commit += "-dirty"
-    return {
+    provenance = {
         "soma_commit": commit,
         "soma_version": soma.__version__,
         "slide2vec_version": version("slide2vec"),
     }
-
-
-def make_soma_extractor(cache_root: Path) -> Extractor:
-    """Build the real extractor. All variants share ``cache_root``, so tiling runs once."""
-    from soma.config import CacheConfig, EncoderConfig, ExecutionConfig, PreprocessingConfig
-    from soma.dataset import Dataset
-    from soma.extraction import FeatureExtractor
 
     def extract(dataset_csv: Path, variant: str, output_root: Path) -> Path:
         result = FeatureExtractor(
@@ -235,7 +273,7 @@ def make_soma_extractor(cache_root: Path) -> Extractor:
         ).extract()
         return Path(result.artifacts.feature_dir)
 
-    return extract
+    return SomaBackend(extract, provenance)
 
 
 def build_parser(root: Path = REPO_ROOT) -> argparse.ArgumentParser:
@@ -253,15 +291,15 @@ def build_parser(root: Path = REPO_ROOT) -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    provenance = collect_provenance()
+    backend = make_soma_backend(args.work_root / "cache")
     cohorts = {name: MSI_COHORTS[name] for name in args.cohorts}
     extract_prism2(
         cohorts,
         features_root=args.features_root,
         work_root=args.work_root,
-        extractor=make_soma_extractor(args.work_root / "cache"),
+        extractor=backend.extractor,
         access_check=check_prism2_access,
-        provenance=provenance,
+        provenance=backend.provenance,
         variants=args.variants,
     )
     print(f"Saved verified PRISM2 features under {args.features_root}")

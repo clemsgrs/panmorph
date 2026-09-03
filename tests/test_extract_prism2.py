@@ -13,6 +13,7 @@ from experiments.extract_prism2 import (
     build_parser,
     check_prism2_access,
     extract_prism2,
+    require_pinned_prism2_revision,
     require_soma_version,
     verify_features,
 )
@@ -60,6 +61,15 @@ def test_dataset_table_drops_cases_without_a_label(tmp_path: Path) -> None:
     table = build_dataset_table(label_csv, "msi_high")
 
     assert table["sample_id"].tolist() == ["TCGA-AA-0001"]
+
+
+def test_dataset_table_refuses_a_label_table_that_names_one_case_twice(tmp_path: Path) -> None:
+    label_csv = _write_label_table(
+        tmp_path / "labels.csv", [("TCGA-AA-0001", 1), ("TCGA-AA-0001", 0)]
+    )
+
+    with pytest.raises(IntegrityError, match="labels.csv.*duplicate.*TCGA-AA-0001"):
+        build_dataset_table(label_csv, "msi_high")
 
 
 def _write_features(directory: Path, cases: dict[str, int]) -> None:
@@ -228,6 +238,26 @@ def test_extraction_resumes_and_skips_cohorts_that_are_already_verified(tmp_path
     assert (features_root / "prism2-base" / "STAD" / "manifest.json").exists()
 
 
+def test_duplicate_case_in_a_label_table_stops_extraction_before_the_extractor_runs(
+    tmp_path: Path,
+) -> None:
+    cohorts = _cohorts(tmp_path)
+    _write_label_table(cohorts["COAD"][0], [("TCGA-CO-0001", 1), ("TCGA-CO-0001", 0)])
+    extractor = FakeExtractor()
+
+    with pytest.raises(IntegrityError, match="duplicate.*TCGA-CO-0001"):
+        extract_prism2(
+            cohorts,
+            features_root=tmp_path / "features",
+            work_root=tmp_path / "work",
+            extractor=extractor,
+            access_check=lambda: None,
+            provenance=_PROVENANCE,
+        )
+
+    assert extractor.calls == []
+
+
 def test_extraction_fails_when_the_extractor_writes_the_wrong_width(tmp_path: Path) -> None:
     with pytest.raises(IntegrityError, match="width 1280, expected 2560"):
         extract_prism2(
@@ -249,7 +279,20 @@ def test_soma_version_below_the_slide_level_fix_is_refused() -> None:
 
 def test_soma_version_at_or_above_the_slide_level_fix_is_accepted() -> None:
     require_soma_version("1.13.0")
+    require_soma_version("1.13")
     require_soma_version("1.14.2")
+    require_soma_version("1.14.0rc1+local")
+
+
+def test_pinned_prism2_revision_must_match_the_one_slide2vec_loads() -> None:
+    require_pinned_prism2_revision("450352d0ddc6b42b21ce20794ce0fbefe6b5a47a")
+    with pytest.raises(RuntimeError, match="deadbeef.*450352d0"):
+        require_pinned_prism2_revision("deadbeef")
+
+
+def test_unparsable_soma_version_is_refused() -> None:
+    with pytest.raises(RuntimeError, match="0.0.0\\+unknown.*1.13.0"):
+        require_soma_version("0.0.0+unknown")
 
 
 def test_command_defaults_to_the_shared_feature_root_and_both_variants() -> None:
@@ -262,26 +305,30 @@ def test_command_defaults_to_the_shared_feature_root_and_both_variants() -> None
 
 
 class FakeHubApi:
+    """Mirror the keyword-only signature of ``huggingface_hub.HfApi.auth_check``."""
+
     def __init__(self, error: Exception | None = None) -> None:
         self.error = error
-        self.checked: list[tuple[str, str | None]] = []
+        self.checked: list[str] = []
 
-    def auth_check(self, repo_id: str, *, revision: str | None = None) -> None:
-        self.checked.append((repo_id, revision))
+    def auth_check(self, repo_id: str, *, repo_type: str | None = None, token=None) -> None:
+        self.checked.append(repo_id)
         if self.error is not None:
             raise self.error
 
 
-def test_access_check_asks_the_hub_about_the_pinned_prism2_revision() -> None:
+def test_access_check_asks_the_hub_about_the_prism2_repository() -> None:
     api = FakeHubApi()
 
     check_prism2_access(api=api)
 
-    assert api.checked == [("paige-ai/Prism2", "450352d0ddc6b42b21ce20794ce0fbefe6b5a47a")]
+    assert api.checked == ["paige-ai/Prism2"]
 
 
 def test_access_check_turns_a_hub_refusal_into_a_clear_error() -> None:
-    api = FakeHubApi(error=PermissionError("gated"))
+    from huggingface_hub.errors import GatedRepoError
 
-    with pytest.raises(AccessError, match="paige-ai/Prism2"):
+    api = FakeHubApi(error=GatedRepoError("gated"))
+
+    with pytest.raises(AccessError, match="paige-ai/Prism2.*gated"):
         check_prism2_access(api=api)
