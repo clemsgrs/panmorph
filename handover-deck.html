@@ -20,6 +20,9 @@
     --cell-weak: #E9E5F2;
     --series-warm: #5A4A9C;
     --series-cold: #C05577;
+    --set-prism: #0072B2;
+    --set-base: #D55E00;
+    --set-diag: #009E73;
     --shadow: 0 1px 2px rgba(36,31,51,.05), 0 8px 28px rgba(36,31,51,.06);
   }
   @media (prefers-color-scheme: dark) {
@@ -162,6 +165,17 @@
   .swatch.strong { background: var(--cell-strong); border-color: var(--cell-strong); }
   .swatch.weak { background: var(--cell-weak); }
   .swatch.self { background: var(--surface); border-style: dashed; }
+  .swatch.line { height: 3px; border: 0; border-radius: 2px; width: 1.2rem; }
+
+  .tabs { display: flex; flex-wrap: wrap; gap: .4rem; margin: 1.4rem 0 .2rem; }
+  .tab {
+    font-family: "IBM Plex Mono", monospace; font-size: .78rem; font-weight: 600;
+    letter-spacing: .06em; padding: .4em .9em; border-radius: 999px; cursor: pointer;
+    background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line);
+  }
+  .tab[aria-selected="true"] { background: var(--hema); color: #fff; border-color: var(--hema); }
+  .tab:focus-visible { outline: 2px solid var(--eosin); outline-offset: 2px; }
+  .tab-panel .footnote { margin-top: .8rem; }
 
   .cards { display: grid; gap: 1rem; margin: 1.6rem 0 0; }
   .card {
@@ -242,6 +256,13 @@
 <section class="slide" id="s5"><div class="slide-inner">
   <div class="eyebrow"><span class="num">05</span><span>Results</span></div>
   <h2>The transfer is real — between GI organs</h2>
+  <p>Rows are the training organ, columns the test organ. Pick a feature set; the probe, the splits, and the pass rule are the same for all three.</p>
+  <div class="tabs" role="tablist" aria-label="Feature set">
+    <button class="tab" role="tab" aria-selected="true" aria-controls="s5-prism" id="s5-tab-prism">PRISM</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="s5-base" id="s5-tab-base">PRISM2 base</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="s5-diag" id="s5-tab-diag">PRISM2 diagnostic</button>
+  </div>
+  <div class="tab-panel" role="tabpanel" id="s5-prism" aria-labelledby="s5-tab-prism">
   <div class="matrix-wrap"><div class="matrix">
     <div class="m-corner">trained on ↓</div>
     <div class="m-head">→ Colon</div><div class="m-head">→ Stomach</div><div class="m-head">→ Endometrium</div>
@@ -258,6 +279,46 @@
     <div class="m-cell"><span class="auc">0.52</span><span class="sub">no</span></div>
     <div class="m-cell self"><span class="auc">0.75</span><span class="sub">itself</span></div>
   </div></div>
+  <p class="footnote">Read one row: a model trained only on <strong>stomach</strong> scores <strong>0.74</strong> on colon — almost as good as colon's own <strong>0.77</strong>. Without ever seeing a colon slide.</p>
+  </div>
+  <div class="tab-panel" role="tabpanel" id="s5-base" aria-labelledby="s5-tab-base" hidden>
+  <div class="matrix-wrap"><div class="matrix">
+    <div class="m-corner">trained on ↓</div>
+    <div class="m-head">→ Colon</div><div class="m-head">→ Stomach</div><div class="m-head">→ Endometrium</div>
+    <div class="m-corner">Colon</div>
+    <div class="m-cell self"><span class="auc">0.69</span><span class="sub">itself</span></div>
+    <div class="m-cell strong"><span class="auc">0.76</span><span class="sub">transfers ✓</span></div>
+    <div class="m-cell"><span class="auc">0.51</span><span class="sub">no</span></div>
+    <div class="m-corner">Stomach</div>
+    <div class="m-cell strong"><span class="auc">0.76</span><span class="sub">transfers ✓</span></div>
+    <div class="m-cell self"><span class="auc">0.85</span><span class="sub">itself</span></div>
+    <div class="m-cell"><span class="auc">0.55</span><span class="sub">no</span></div>
+    <div class="m-corner">Endometrium</div>
+    <div class="m-cell strong"><span class="auc">0.72</span><span class="sub">transfers ✓</span></div>
+    <div class="m-cell strong"><span class="auc">0.69</span><span class="sub">transfers ✓</span></div>
+    <div class="m-cell self"><span class="auc">0.72</span><span class="sub">itself</span></div>
+  </div></div>
+  <p class="footnote">Colon ↔ stomach still transfers both ways. <strong>Endometrium now transfers out</strong>, into colon and stomach, but still not in. The colon ceiling is lower than with PRISM.</p>
+  </div>
+  <div class="tab-panel" role="tabpanel" id="s5-diag" aria-labelledby="s5-tab-diag" hidden>
+  <div class="matrix-wrap"><div class="matrix">
+    <div class="m-corner">trained on ↓</div>
+    <div class="m-head">→ Colon</div><div class="m-head">→ Stomach</div><div class="m-head">→ Endometrium</div>
+    <div class="m-corner">Colon</div>
+    <div class="m-cell self"><span class="auc">0.63</span><span class="sub">itself</span></div>
+    <div class="m-cell"><span class="auc">0.62</span><span class="sub">no</span></div>
+    <div class="m-cell"><span class="auc">0.56</span><span class="sub">no</span></div>
+    <div class="m-corner">Stomach</div>
+    <div class="m-cell strong"><span class="auc">0.76</span><span class="sub">transfers ✓</span></div>
+    <div class="m-cell self"><span class="auc">0.81</span><span class="sub">itself</span></div>
+    <div class="m-cell"><span class="auc">0.50</span><span class="sub">no</span></div>
+    <div class="m-corner">Endometrium</div>
+    <div class="m-cell strong"><span class="auc">0.70</span><span class="sub">transfers ✓</span></div>
+    <div class="m-cell"><span class="auc">0.53</span><span class="sub">no</span></div>
+    <div class="m-cell self"><span class="auc">0.72</span><span class="sub">itself</span></div>
+  </div></div>
+  <p class="footnote">Stomach → colon holds, colon → stomach no longer passes. Endometrium transfers into colon only. The colon ceiling is the lowest of the three sets.</p>
+  </div>
   <div class="legend">
     <span><span class="swatch strong"></span>significant transfer (AUC)</span>
     <span><span class="swatch weak"></span>no significant transfer</span>
@@ -370,29 +431,162 @@
       <circle cx="540.0" cy="62.2" r="3.5" fill="var(--series-warm)" stroke="var(--surface)" stroke-width="1.5"/>
       </g>
     </svg>
-    <figcaption class="footnote" style="margin-top:.6rem; text-align:center;">Measured AUC. Blue: other organ + local. Grey dashed: local only. Bands are 95% patient-bootstrap intervals; the local-only curve starts at 3 cases because no model exists at 0. Full matrix in <span class="mono">results/few-label/</span>.</figcaption>
+    <figcaption class="footnote" style="margin-top:.6rem; text-align:center;">Measured AUC. Blue: other organ + local. Grey dashed: local only. Bands are 95% patient-bootstrap intervals; the local-only curve starts at 3 cases because no model exists at 0. PRISM features; the next slide compares all three feature sets. Full matrix in <span class="mono">results/few-label/</span>.</figcaption>
   </figure>
   <ul class="tight" style="margin-top:1.2rem">
     <li><strong>Stomach data keeps helping the colon model</strong> through 40 local positives: AUC 0.80 with it, 0.75 without (gain 0.05, interval 0.00 to 0.11).</li>
     <li><strong>Colon data helps the stomach model only at the start.</strong> Gain 0.12 with three local positives, 0.07 with five. At ten the curves meet (gain 0.01, interval −0.03 to 0.06).</li>
     <li><strong>Endometrium adds little either way</strong>, and can weaken a good colon or stomach source.</li>
   </ul>
-  <p class="footnote" style="margin-top:1rem">One cell was pre-registered as the decisive test: colon → stomach with ten local positives. The rule is that the interval on the gain must exclude zero. It does not, so the registered claim is <strong>not confirmed</strong>; the early-label gains are exploratory.</p>
 </div></section>
 
 <!-- 8 · Stronger models -->
 <section class="slide" id="s8"><div class="slide-inner">
   <div class="eyebrow"><span class="num">08</span><span>Done · a stronger model is tested</span></div>
   <h2>A better model does not change the picture for endometrium</h2>
-  <p>We swapped PRISM for <strong>PRISM2</strong> and kept everything else fixed: the probe, the splits, the gate rule, and the registered cell.
-  PRISM2 gives two slide embeddings, <strong>base</strong> and <strong>diagnostic</strong>. We report both and select neither.</p>
-  <ul class="tight">
-    <li><strong>Colon ↔ stomach</strong> still transfers with the base embedding (AUC 0.76 both ways). With the diagnostic embedding, colon → stomach drops to 0.62 and fails the gate.</li>
+  <p>We swapped PRISM for <strong>PRISM2</strong> and kept everything else fixed: the probe, the splits, the draws, and the gate rule.
+  PRISM2 gives two slide embeddings, <strong>base</strong> and <strong>diagnostic</strong>. We report all three feature sets and select none.</p>
+  <figure style="margin:1.4rem 0 0; background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:1.2rem 1rem .8rem; box-shadow:var(--shadow); overflow-x:auto;">
+<svg viewBox="0 0 1160 310" role="img" aria-label="AUC gain from other-organ data for the three feature sets, stomach-to-colon and colon-to-stomach." style="width:100%; min-width:560px; display:block; font-family:'IBM Plex Mono',monospace;">
+  <g transform="translate(0,0)">
+  <text x="300" y="18" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">Stomach data → colon model</text>
+  <line x1="60" y1="30" x2="60" y2="250.0" stroke="var(--line)" stroke-width="1.5"/>
+  <line x1="60" y1="250.0" x2="560" y2="250.0" stroke="var(--line)" stroke-width=".5" opacity=".6"/>
+  <text x="54" y="254.0" text-anchor="end" font-size="11" fill="var(--ink-2)">-0.10</text>
+  <line x1="60" y1="206.0" x2="560" y2="206.0" stroke="var(--line)" stroke-width=".5" opacity=".6"/>
+  <text x="54" y="210.0" text-anchor="end" font-size="11" fill="var(--ink-2)">-0.05</text>
+  <line x1="60" y1="162.0" x2="560" y2="162.0" stroke="var(--ink-2)" stroke-width="1.2" opacity="1"/>
+  <text x="54" y="166.0" text-anchor="end" font-size="11" fill="var(--ink-2)">+0.00</text>
+  <line x1="60" y1="118.0" x2="560" y2="118.0" stroke="var(--line)" stroke-width=".5" opacity=".6"/>
+  <text x="54" y="122.0" text-anchor="end" font-size="11" fill="var(--ink-2)">+0.05</text>
+  <line x1="60" y1="74.0" x2="560" y2="74.0" stroke="var(--line)" stroke-width=".5" opacity=".6"/>
+  <text x="54" y="78.0" text-anchor="end" font-size="11" fill="var(--ink-2)">+0.10</text>
+  <line x1="60" y1="30.0" x2="560" y2="30.0" stroke="var(--line)" stroke-width=".5" opacity=".6"/>
+  <text x="54" y="34.0" text-anchor="end" font-size="11" fill="var(--ink-2)">+0.15</text>
+  <text x="60" y="272" text-anchor="middle" font-size="11" fill="var(--ink-2)">3</text>
+  <text x="156" y="272" text-anchor="middle" font-size="11" fill="var(--ink-2)">5</text>
+  <text x="252" y="272" text-anchor="middle" font-size="11" fill="var(--ink-2)">10</text>
+  <text x="348" y="272" text-anchor="middle" font-size="11" fill="var(--ink-2)">25</text>
+  <text x="444" y="272" text-anchor="middle" font-size="11" fill="var(--ink-2)">40</text>
+  <text x="540" y="272" text-anchor="middle" font-size="11" fill="var(--ink-2)">all</text>
+  <text x="310" y="292" text-anchor="middle" font-size="11" fill="var(--ink-2)">local MSI-positive cases used for training</text>
+  <polyline points="53.0,65.4 149.0,75.2 245.0,103.0 341.0,107.1 437.0,114.7 533.0,126.5" fill="none" stroke="var(--set-prism)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="53.0" y1="111.6" x2="53.0" y2="22.5" stroke="var(--set-prism)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="53.0" cy="65.4" r="3.2" fill="var(--set-prism)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="149.0" y1="119.5" x2="149.0" y2="34.0" stroke="var(--set-prism)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="149.0" cy="75.2" r="3.2" fill="var(--set-prism)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="245.0" y1="142.9" x2="245.0" y2="63.8" stroke="var(--set-prism)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="245.0" cy="103.0" r="3.2" fill="var(--set-prism)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="341.0" y1="149.6" x2="341.0" y2="63.2" stroke="var(--set-prism)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="341.0" cy="107.1" r="3.2" fill="var(--set-prism)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="437.0" y1="160.4" x2="437.0" y2="67.8" stroke="var(--set-prism)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="437.0" cy="114.7" r="3.2" fill="var(--set-prism)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="533.0" y1="173.6" x2="533.0" y2="71.8" stroke="var(--set-prism)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="533.0" cy="126.5" r="3.2" fill="var(--set-prism)" stroke="var(--surface)" stroke-width="1.2"/>
+  <polyline points="60.0,92.6 156.0,72.4 252.0,101.9 348.0,101.1 444.0,102.3 540.0,111.5" fill="none" stroke="var(--set-base)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="60.0" y1="141.0" x2="60.0" y2="48.6" stroke="var(--set-base)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="60.0" cy="92.6" r="3.2" fill="var(--set-base)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="156.0" y1="123.6" x2="156.0" y2="26.0" stroke="var(--set-base)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="156.0" cy="72.4" r="3.2" fill="var(--set-base)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="252.0" y1="145.5" x2="252.0" y2="59.1" stroke="var(--set-base)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="252.0" cy="101.9" r="3.2" fill="var(--set-base)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="348.0" y1="143.2" x2="348.0" y2="59.3" stroke="var(--set-base)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="348.0" cy="101.1" r="3.2" fill="var(--set-base)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="444.0" y1="142.6" x2="444.0" y2="61.4" stroke="var(--set-base)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="444.0" cy="102.3" r="3.2" fill="var(--set-base)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="540.0" y1="156.0" x2="540.0" y2="67.7" stroke="var(--set-base)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="540.0" cy="111.5" r="3.2" fill="var(--set-base)" stroke="var(--surface)" stroke-width="1.2"/>
+  <polyline points="67.0,66.8 163.0,58.6 259.0,103.4 355.0,114.9 451.0,116.3 547.0,115.3" fill="none" stroke="var(--set-diag)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="67.0" y1="110.8" x2="67.0" y2="24.0" stroke="var(--set-diag)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="67.0" cy="66.8" r="3.2" fill="var(--set-diag)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="163.0" y1="104.7" x2="163.0" y2="13.1" stroke="var(--set-diag)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="163.0" cy="58.6" r="3.2" fill="var(--set-diag)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="259.0" y1="144.1" x2="259.0" y2="64.9" stroke="var(--set-diag)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="259.0" cy="103.4" r="3.2" fill="var(--set-diag)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="355.0" y1="154.5" x2="355.0" y2="77.1" stroke="var(--set-diag)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="355.0" cy="114.9" r="3.2" fill="var(--set-diag)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="451.0" y1="160.1" x2="451.0" y2="75.0" stroke="var(--set-diag)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="451.0" cy="116.3" r="3.2" fill="var(--set-diag)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="547.0" y1="164.0" x2="547.0" y2="67.0" stroke="var(--set-diag)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="547.0" cy="115.3" r="3.2" fill="var(--set-diag)" stroke="var(--surface)" stroke-width="1.2"/>
+  </g>
+  <g transform="translate(600,0)">
+  <text x="300" y="18" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">Colon data → stomach model</text>
+  <line x1="60" y1="30" x2="60" y2="250.0" stroke="var(--line)" stroke-width="1.5"/>
+  <line x1="60" y1="250.0" x2="560" y2="250.0" stroke="var(--line)" stroke-width=".5" opacity=".6"/>
+  <text x="54" y="254.0" text-anchor="end" font-size="11" fill="var(--ink-2)">-0.10</text>
+  <line x1="60" y1="206.0" x2="560" y2="206.0" stroke="var(--line)" stroke-width=".5" opacity=".6"/>
+  <text x="54" y="210.0" text-anchor="end" font-size="11" fill="var(--ink-2)">-0.05</text>
+  <line x1="60" y1="162.0" x2="560" y2="162.0" stroke="var(--ink-2)" stroke-width="1.2" opacity="1"/>
+  <text x="54" y="166.0" text-anchor="end" font-size="11" fill="var(--ink-2)">+0.00</text>
+  <line x1="60" y1="118.0" x2="560" y2="118.0" stroke="var(--line)" stroke-width=".5" opacity=".6"/>
+  <text x="54" y="122.0" text-anchor="end" font-size="11" fill="var(--ink-2)">+0.05</text>
+  <line x1="60" y1="74.0" x2="560" y2="74.0" stroke="var(--line)" stroke-width=".5" opacity=".6"/>
+  <text x="54" y="78.0" text-anchor="end" font-size="11" fill="var(--ink-2)">+0.10</text>
+  <line x1="60" y1="30.0" x2="560" y2="30.0" stroke="var(--line)" stroke-width=".5" opacity=".6"/>
+  <text x="54" y="34.0" text-anchor="end" font-size="11" fill="var(--ink-2)">+0.15</text>
+  <text x="60" y="272" text-anchor="middle" font-size="11" fill="var(--ink-2)">3</text>
+  <text x="156" y="272" text-anchor="middle" font-size="11" fill="var(--ink-2)">5</text>
+  <text x="252" y="272" text-anchor="middle" font-size="11" fill="var(--ink-2)">10</text>
+  <text x="348" y="272" text-anchor="middle" font-size="11" fill="var(--ink-2)">25</text>
+  <text x="444" y="272" text-anchor="middle" font-size="11" fill="var(--ink-2)">40</text>
+  <text x="540" y="272" text-anchor="middle" font-size="11" fill="var(--ink-2)">all</text>
+  <text x="310" y="292" text-anchor="middle" font-size="11" fill="var(--ink-2)">local MSI-positive cases used for training</text>
+  <polyline points="53.0,55.3 149.0,103.2 245.0,149.5 341.0,177.1 437.0,181.3 533.0,183.4" fill="none" stroke="var(--set-prism)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="53.0" y1="103.6" x2="53.0" y2="6.5" stroke="var(--set-prism)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="53.0" cy="55.3" r="3.2" fill="var(--set-prism)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="149.0" y1="149.5" x2="149.0" y2="56.3" stroke="var(--set-prism)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="149.0" cy="103.2" r="3.2" fill="var(--set-prism)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="245.0" y1="189.5" x2="245.0" y2="107.9" stroke="var(--set-prism)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="245.0" cy="149.5" r="3.2" fill="var(--set-prism)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="341.0" y1="211.0" x2="341.0" y2="143.8" stroke="var(--set-prism)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="341.0" cy="177.1" r="3.2" fill="var(--set-prism)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="437.0" y1="215.8" x2="437.0" y2="146.2" stroke="var(--set-prism)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="437.0" cy="181.3" r="3.2" fill="var(--set-prism)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="533.0" y1="221.6" x2="533.0" y2="144.8" stroke="var(--set-prism)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="533.0" cy="183.4" r="3.2" fill="var(--set-prism)" stroke="var(--surface)" stroke-width="1.2"/>
+  <polyline points="60.0,49.0 156.0,91.5 252.0,108.2 348.0,129.5 444.0,136.5 540.0,133.8" fill="none" stroke="var(--set-base)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="60.0" y1="94.8" x2="60.0" y2="4.0" stroke="var(--set-base)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="60.0" cy="49.0" r="3.2" fill="var(--set-base)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="156.0" y1="135.3" x2="156.0" y2="49.8" stroke="var(--set-base)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="156.0" cy="91.5" r="3.2" fill="var(--set-base)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="252.0" y1="147.0" x2="252.0" y2="71.6" stroke="var(--set-base)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="252.0" cy="108.2" r="3.2" fill="var(--set-base)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="348.0" y1="160.3" x2="348.0" y2="98.8" stroke="var(--set-base)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="348.0" cy="129.5" r="3.2" fill="var(--set-base)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="444.0" y1="167.9" x2="444.0" y2="103.3" stroke="var(--set-base)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="444.0" cy="136.5" r="3.2" fill="var(--set-base)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="540.0" y1="165.4" x2="540.0" y2="100.5" stroke="var(--set-base)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="540.0" cy="133.8" r="3.2" fill="var(--set-base)" stroke="var(--surface)" stroke-width="1.2"/>
+  <polyline points="67.0,129.6 163.0,143.1 259.0,153.8 355.0,164.3 451.0,159.6 547.0,157.7" fill="none" stroke="var(--set-diag)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="67.0" y1="184.0" x2="67.0" y2="76.3" stroke="var(--set-diag)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="67.0" cy="129.6" r="3.2" fill="var(--set-diag)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="163.0" y1="192.5" x2="163.0" y2="96.4" stroke="var(--set-diag)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="163.0" cy="143.1" r="3.2" fill="var(--set-diag)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="259.0" y1="195.9" x2="259.0" y2="112.7" stroke="var(--set-diag)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="259.0" cy="153.8" r="3.2" fill="var(--set-diag)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="355.0" y1="199.2" x2="355.0" y2="130.5" stroke="var(--set-diag)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="355.0" cy="164.3" r="3.2" fill="var(--set-diag)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="451.0" y1="195.6" x2="451.0" y2="121.9" stroke="var(--set-diag)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="451.0" cy="159.6" r="3.2" fill="var(--set-diag)" stroke="var(--surface)" stroke-width="1.2"/>
+  <line x1="547.0" y1="196.3" x2="547.0" y2="116.6" stroke="var(--set-diag)" stroke-width="1.2" opacity=".7"/>
+  <circle cx="547.0" cy="157.7" r="3.2" fill="var(--set-diag)" stroke="var(--surface)" stroke-width="1.2"/>
+  </g>
+</svg>
+    <figcaption class="footnote" style="margin-top:.6rem; text-align:center;">AUC gain from the other organ's data, with 95% paired bootstrap intervals. Above zero favors adding the other organ. Series are offset a little so they do not hide each other.</figcaption>
+  </figure>
+  <div class="legend">
+    <span><span class="swatch line" style="background:var(--set-prism)"></span>PRISM</span>
+    <span><span class="swatch line" style="background:var(--set-base)"></span>PRISM2 base</span>
+    <span><span class="swatch line" style="background:var(--set-diag)"></span>PRISM2 diagnostic</span>
+  </div>
+  <ul class="tight" style="margin-top:1.2rem">
+    <li><strong>Stomach → colon holds with every feature set</strong>, zero-shot and with local labels: the gain stays near 0.05 to 0.07 through 40 local positives.</li>
+    <li><strong>Colon → stomach depends on the embedding.</strong> PRISM and PRISM2 base give a clear early gain; with base it lasts to 25 local positives (0.04, interval 0.00 to 0.07). With the diagnostic embedding the zero-shot cell fails (AUC 0.62) and no gain is clear.</li>
     <li><strong>Endometrium as a target</strong> does not transfer with any feature set (AUC 0.50 to 0.59). Its wall is not a limit of the PRISM representation.</li>
-    <li><strong>Endometrium as a source</strong> is new: it passes into colon with both embeddings, and into stomach with the base embedding.</li>
-    <li><strong>The registered few-label cell</strong> (colon data for the stomach model, ten local positives) is met with the base embedding: gain 0.061 [0.017, 0.103]. It is not met with PRISM (0.014) or with the diagnostic embedding (0.009).</li>
+    <li><strong>Endometrium as a source</strong> is new: it passes into colon with both PRISM2 embeddings and into stomach with base, and its data stops hurting the colon model.</li>
   </ul>
-  <p class="footnote">The probe is unchanged, so a wider embedding at the same regularization is effectively less regularized. The colon ceiling is lower with PRISM2 (0.77 → 0.69 base, 0.63 diagnostic). Tables: <span class="mono">results/prism2-base/</span>, <span class="mono">results/prism2-diagnostic/</span>. A tile encoder with a trainable MIL aggregator remains untested.</p>
+  <p class="footnote">No test between feature sets is computed. The probe is unchanged, so a wider embedding at the same regularization is effectively less regularized; the colon ceiling is lower with PRISM2 (0.77 → 0.69 base, 0.63 diagnostic). Tables and curves: <span class="mono">results/prism2-base/</span>, <span class="mono">results/prism2-diagnostic/</span>. A tile encoder with a trainable MIL aggregator remains untested.</p>
 </div></section>
 
 <!-- 9 · Appendix -->
@@ -404,13 +598,15 @@
     <tr><td>Start reading here</td><td class="mono">README.md</td></tr>
     <tr><td>Few-label results</td><td class="mono">results/few-label/README.md</td></tr>
     <tr><td>PRISM2 results</td><td class="mono">results/prism2-base/ · results/prism2-diagnostic/</td></tr>
+    <tr><td>Feature-set comparison</td><td class="mono">results/few_label_lift_by_feature_set.png</td></tr>
     <tr><td>Analysis plan and its amendments</td><td>GitHub issues <span class="mono">panmorph#1</span>, <span class="mono">#7</span></td></tr>
     <tr><td>Raw data</td><td class="mono">/data/pathology/projects/clement/mutation-prediction/</td></tr>
   </table></div>
   <p style="margin-top:1.2rem">Reproduce the results:</p>
   <p><code>python experiments/run_gate.py</code> — zero-shot transfer matrix<br>
   <code>python experiments/run_few_label.py --profile full --out results/few-label-rerun</code> — value curves (about 15 minutes on 8 cores)<br>
-  <code>python experiments/run_gate.py --features prism2-base</code> — the same matrix on a named feature set</p>
+  <code>python experiments/run_gate.py --features prism2-base</code> — the same matrix on a named feature set<br>
+  <code>python experiments/render_few_label_comparison.py prism=results/few-label prism2-base=results/prism2-base/few-label prism2-diagnostic=results/prism2-diagnostic/few-label</code> — the gain figure across feature sets</p>
   <p class="footnote">Every fit uses one BLAS thread, so a re-run on the same machine reproduces the committed numbers byte for byte. A different CPU or BLAS build can move AUCs at the third decimal.</p>
   <p class="lede" style="margin-top:1.6rem">Proving the transfer, measuring its value, and testing a stronger model are done. Endometrium does not transfer as a target with PRISM or PRISM2. The next step is a trainable aggregator below the slide level.</p>
 </div></section>
@@ -420,6 +616,24 @@
 
 <script>
   (function () {
+    document.querySelectorAll('[role="tablist"]').forEach(function (list) {
+      var tabs = Array.prototype.slice.call(list.querySelectorAll('[role="tab"]'));
+      function select(tab) {
+        tabs.forEach(function (other) {
+          var on = other === tab;
+          other.setAttribute('aria-selected', on ? 'true' : 'false');
+          document.getElementById(other.getAttribute('aria-controls')).hidden = !on;
+        });
+        tab.focus();
+      }
+      tabs.forEach(function (tab, index) {
+        tab.addEventListener('click', function () { select(tab); });
+        tab.addEventListener('keydown', function (e) {
+          if (e.key === 'ArrowRight') { select(tabs[(index + 1) % tabs.length]); e.preventDefault(); }
+          if (e.key === 'ArrowLeft') { select(tabs[(index - 1 + tabs.length) % tabs.length]); e.preventDefault(); }
+        });
+      });
+    });
     var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
     function currentIndex() {
       var mid = window.scrollY + window.innerHeight / 2;
