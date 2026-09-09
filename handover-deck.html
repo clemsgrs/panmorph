@@ -194,7 +194,7 @@
   <p class="lede">Can a model that reads tumor slides from one organ detect the same mutation in another organ?</p>
   <p style="margin-top:1.6rem">We tested this for <strong>MSI</strong>, a mutation status that decides whether a patient gets immunotherapy.<br>
   The answer: <strong>yes, for some organ pairs.</strong> We also measured what that transfer is worth when a few local labels exist.</p>
-  <p><span class="chip pass">Done · the transfer is proven</span><span class="chip pass">Done · its value is measured</span><span class="chip hema">Next · stronger models</span></p>
+  <p><span class="chip pass">Done · the transfer is proven</span><span class="chip pass">Done · its value is measured</span><span class="chip pass">Done · a stronger model is tested</span></p>
 </div></section>
 
 <!-- 2 · Motivation -->
@@ -382,16 +382,17 @@
 
 <!-- 8 · Stronger models -->
 <section class="slide" id="s8"><div class="slide-inner">
-  <div class="eyebrow"><span class="num">08</span><span>Next · stronger models</span></div>
-  <h2>Does a better model change the picture?</h2>
-  <p>Everything so far uses the simplest possible setup: frozen embeddings plus a linear classifier.
-  That was the right choice for a clean proof. It also leaves obvious headroom:</p>
+  <div class="eyebrow"><span class="num">08</span><span>Done · a stronger model is tested</span></div>
+  <h2>A better model does not change the picture for endometrium</h2>
+  <p>We swapped PRISM for <strong>PRISM2</strong> and kept everything else fixed: the probe, the splits, the gate rule, and the registered cell.
+  PRISM2 gives two slide embeddings, <strong>base</strong> and <strong>diagnostic</strong>. We report both and select neither.</p>
   <ul class="tight">
-    <li>Swap in a newer foundation model (e.g. <strong>PRISM2</strong>).</li>
-    <li>Go below the slide level: a <strong>tile encoder with a trainable MIL aggregator</strong>, instead of one pre-pooled vector per patient.</li>
+    <li><strong>Colon ↔ stomach</strong> still transfers with the base embedding (AUC 0.76 both ways). With the diagnostic embedding, colon → stomach drops to 0.62 and fails the gate.</li>
+    <li><strong>Endometrium as a target</strong> does not transfer with any feature set (AUC 0.50 to 0.59). Its wall is not a limit of the PRISM representation.</li>
+    <li><strong>Endometrium as a source</strong> is new: it passes into colon with both embeddings, and into stomach with the base embedding.</li>
+    <li><strong>The registered few-label cell</strong> (colon data for the stomach model, ten local positives) is met with the base embedding: gain 0.061 [0.017, 0.103]. It is not met with PRISM (0.014) or with the diagnostic embedding (0.009).</li>
   </ul>
-  <p>The most interesting outcome would be a surprise: if a stronger model makes <strong>endometrium</strong> start transferring, its wall was a limitation of our representation — not of biology.</p>
-  <p class="footnote">The value curves set the bar: a stronger model has to keep helping the stomach model past ten local positives, where the linear probe stops adding anything.</p>
+  <p class="footnote">The probe is unchanged, so a wider embedding at the same regularization is effectively less regularized. The colon ceiling is lower with PRISM2 (0.77 → 0.69 base, 0.63 diagnostic). Tables: <span class="mono">results/prism2-base/</span>, <span class="mono">results/prism2-diagnostic/</span>. A tile encoder with a trainable MIL aggregator remains untested.</p>
 </div></section>
 
 <!-- 9 · Appendix -->
@@ -402,14 +403,16 @@
     <tr><td>Repo (code, docs, results)</td><td class="mono">/data/pathology/projects/clement/code/panmorph</td></tr>
     <tr><td>Start reading here</td><td class="mono">README.md</td></tr>
     <tr><td>Few-label results</td><td class="mono">results/few-label/README.md</td></tr>
+    <tr><td>PRISM2 results</td><td class="mono">results/prism2-base/ · results/prism2-diagnostic/</td></tr>
     <tr><td>Analysis plan and its amendments</td><td>GitHub issues <span class="mono">panmorph#1</span>, <span class="mono">#7</span></td></tr>
     <tr><td>Raw data</td><td class="mono">/data/pathology/projects/clement/mutation-prediction/</td></tr>
   </table></div>
   <p style="margin-top:1.2rem">Reproduce the results:</p>
   <p><code>python experiments/run_gate.py</code> — zero-shot transfer matrix<br>
-  <code>python experiments/run_few_label.py --profile full --out results/few-label-rerun</code> — value curves (about 15 minutes on 8 cores)</p>
+  <code>python experiments/run_few_label.py --profile full --out results/few-label-rerun</code> — value curves (about 15 minutes on 8 cores)<br>
+  <code>python experiments/run_gate.py --features prism2-base</code> — the same matrix on a named feature set</p>
   <p class="footnote">Every fit uses one BLAS thread, so a re-run on the same machine reproduces the committed numbers byte for byte. A different CPU or BLAS build can move AUCs at the third decimal.</p>
-  <p class="lede" style="margin-top:1.6rem">Proving the transfer and measuring its value are done. The open question is whether a stronger model changes the picture.</p>
+  <p class="lede" style="margin-top:1.6rem">Proving the transfer, measuring its value, and testing a stronger model are done. Endometrium does not transfer as a target with PRISM or PRISM2. The next step is a trainable aggregator below the slide level.</p>
 </div></section>
 
 </div>
