@@ -118,10 +118,15 @@ def feature_set_dir(features_root: Path, variant: str, cohort: str) -> Path:
 
 
 def mirror_features(feature_dir: Path, destination: Path, case_ids: Sequence[str]) -> None:
-    """Copy one ``<case_id>.pt`` per case from the extractor output into ``destination``."""
+    """Copy one ``<case_id>.pt`` per case from the extractor output into ``destination``.
+
+    The bytes are the payload, so this copies content only. ``copy2`` would also replay
+    the source timestamps, and the features root is an SMB share that refuses ``utime``;
+    the run provenance lives in the manifest, not in file mtimes.
+    """
     destination.mkdir(parents=True, exist_ok=True)
     for case in case_ids:
-        shutil.copy2(feature_dir / f"{case}.pt", destination / f"{case}.pt")
+        shutil.copyfile(feature_dir / f"{case}.pt", destination / f"{case}.pt")
 
 
 def write_manifest(
