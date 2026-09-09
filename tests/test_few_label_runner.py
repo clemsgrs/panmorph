@@ -516,3 +516,19 @@ def test_bundle_validation_can_require_completion(
 
     with pytest.raises(ValueError, match="bundle is not complete"):
         validate_few_label_bundle(out, require_complete=True)
+
+
+def test_few_label_script_default_out_follows_the_feature_set(tmp_path):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "run_few_label", Path(__file__).resolve().parents[1] / "experiments" / "run_few_label.py"
+    )
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    assert script.parse_args([], root=tmp_path).out == tmp_path / "results" / "few-label"
+    assert (
+        script.parse_args(["--features", "prism2-base"], root=tmp_path).out
+        == tmp_path / "results" / "prism2-base" / "few-label"
+    )
+    assert script.parse_args(["--out", "x"], root=tmp_path).out == Path("x")

@@ -1,0 +1,146 @@
+{
+  "code": {
+    "commit": "ac84136db14b49ea304865af7aa05082991e8fe4",
+    "sha256": "be56d7489d366eb544c828546007e6a03cb18d885f4dc768b08e2b7551af542b"
+  },
+  "cohorts": {
+    "COAD": {
+      "case_sha256": "f7fadb59a994258e3c9a1ae775d5a788bdd9df373307361c0870383d5c7bc6f3",
+      "cases": 391,
+      "positives": 74,
+      "sha256": "7d8821aa3bdc16b662838e8222475d6447329ba5fd063ad53a062a9600b2ccfa"
+    },
+    "STAD": {
+      "case_sha256": "9dc6c81391cd30cba1d62acf08f59d82b8508ddff96809ddfb48822c933727e9",
+      "cases": 371,
+      "positives": 63,
+      "sha256": "1ea579d6e95deeac9de228c5ac73f6e3a039b37a076cfa1a3467cc2945521906"
+    },
+    "UCEC": {
+      "case_sha256": "fe205c4d87b2bc53e3f8412f26ebdabce394ac9b9ede25c8b26818a2503d37ed",
+      "cases": 487,
+      "positives": 155,
+      "sha256": "bd6ebd2ec4ac64263149c8d2bbf53458a6d704612490e8a9af84a191a681173c"
+    }
+  },
+  "configuration": {
+    "bootstrap_replicates": 2000,
+    "confirmatory": {
+      "cell": {
+        "base": "single",
+        "k": 10,
+        "source": "COAD",
+        "target": "STAD"
+      },
+      "rule": "paired stratified patient-bootstrap 95% interval on the lift excludes zero"
+    },
+    "draw_ids": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19
+    ],
+    "pairs": "registered_full_matrix",
+    "rungs": [
+      0,
+      3,
+      5,
+      10,
+      25,
+      40,
+      "all"
+    ],
+    "seeds": {
+      "bootstrap": 0,
+      "draws": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19
+      ]
+    }
+  },
+  "elapsed_seconds": 2755.721633768175,
+  "environment": {
+    "blas": [
+      {
+        "architecture": "SkylakeX",
+        "library": "openblas",
+        "version": "0.3.23.dev"
+      },
+      {
+        "architecture": "SkylakeX",
+        "library": "openblas",
+        "version": "0.3.30"
+      }
+    ],
+    "cpu": "Intel(R) Xeon(R) Gold 6152 CPU @ 2.10GHz",
+    "hostname": "dlc-zapdos",
+    "numpy": "1.26.4",
+    "python": "3.11.15",
+    "scikit_learn": "1.7.2"
+  },
+  "features": {
+    "extractor": "PRISM2",
+    "hashes": {
+      "COAD": "prism2-base/COAD",
+      "STAD": "prism2-base/STAD",
+      "UCEC": "prism2-base/UCEC"
+    },
+    "name": "prism2-base",
+    "width": 2560
+  },
+  "model": {
+    "hyperparameters": {
+      "C": 1.0,
+      "class_weight": "balanced",
+      "max_iter": 2000
+    },
+    "type": "StandardScaler+LogisticRegression"
+  },
+  "profile": "full",
+  "reportable": true,
+  "resources": {
+    "threads_per_worker": 1,
+    "workers": 8
+  },
+  "schema_version": "panmorph.few-label.bundle/v2",
+  "splitter": {
+    "folds": 5,
+    "groups": "tissue_source_site",
+    "type": "GroupKFold"
+  },
+  "status": "complete"
+}
