@@ -13,13 +13,17 @@ from panmorph.few_label_runner import (  # noqa: E402
     CompleteBundleError,
     run_few_label_bundle,
 )
+from panmorph.gate import results_dir  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def build_parser(root: Path = ROOT) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", type=Path, default=root / "results" / "few-label")
+    parser.add_argument(
+        "--out", type=Path, default=None,
+        help="bundle directory (default: <results dir of --features>/few-label)",
+    )
     parser.add_argument("--profile", choices=("quick", "full"), default="full")
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
     parser.add_argument(
@@ -29,8 +33,15 @@ def build_parser(root: Path = ROOT) -> argparse.ArgumentParser:
     return parser
 
 
+def parse_args(argv: list[str] | None = None, root: Path = ROOT) -> argparse.Namespace:
+    args = build_parser(root).parse_args(argv)
+    if args.out is None:
+        args.out = results_dir(args.features, root) / "few-label"
+    return args
+
+
 def main() -> None:
-    args = build_parser().parse_args()
+    args = parse_args()
     try:
         run_few_label_bundle(
             args.out, profile=args.profile, workers=args.workers, features=args.features

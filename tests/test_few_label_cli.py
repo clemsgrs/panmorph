@@ -4,13 +4,25 @@ from pathlib import Path
 import pytest
 
 import experiments.run_few_label as script
-from experiments.run_few_label import build_parser
+from experiments.run_few_label import build_parser, parse_args
 
 
 def test_few_label_command_uses_clear_default_result_directory() -> None:
-    args = build_parser(Path("/repo")).parse_args([])
+    args = parse_args([], root=Path("/repo"))
 
     assert args.out == Path("/repo/results/few-label")
+
+
+def test_few_label_command_default_result_directory_follows_the_feature_set() -> None:
+    args = parse_args(["--features", "prism2-base"], root=Path("/repo"))
+
+    assert args.out == Path("/repo/results/prism2-base/few-label")
+
+
+def test_few_label_command_keeps_an_explicit_result_directory() -> None:
+    args = parse_args(["--features", "prism2-base", "--out", "x"], root=Path("/repo"))
+
+    assert args.out == Path("x")
 
 
 def test_few_label_command_defaults_to_the_prism_feature_set() -> None:
